@@ -69,6 +69,137 @@ class BurstEvent:
 
 
 @dataclass(frozen=True)
+class ScanEmitter:
+    candidate_id: str
+    approx_freq_hz: float | None
+    dominant_label: str
+    label_counts: dict[str, int]
+    burst_count: int
+    capture_count: int
+    total_on_air_s: float
+    duration_min_s: float
+    duration_max_s: float
+    mean_duration_s: float
+    bandwidth_min_hz: float
+    bandwidth_max_hz: float
+    mean_bandwidth_hz: float
+    mean_duty_cycle: float
+    mean_confidence: float
+    repetition_interval_mean_s: float | None
+    repetition_interval_std_s: float | None
+    source_paths: tuple[str, ...] = field(default_factory=tuple)
+    notes: tuple[str, ...] = field(default_factory=tuple)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class ScanSummary:
+    kind: str
+    input_paths: tuple[str, ...]
+    event_count: int
+    emitter_count: int
+    label_counts: dict[str, int]
+    emitters: tuple[ScanEmitter, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class EmitterFingerprint:
+    fingerprint_id: str
+    approx_freq_hz: float | None
+    dominant_label: str
+    burst_count: int
+    duration_min_s: float
+    duration_max_s: float
+    mean_duration_s: float
+    bandwidth_min_hz: float
+    bandwidth_max_hz: float
+    mean_bandwidth_hz: float
+    mean_duty_cycle: float
+    mean_confidence: float
+    repetition_interval_mean_s: float | None
+    repetition_interval_std_s: float | None
+    source_paths: tuple[str, ...] = field(default_factory=tuple)
+    notes: tuple[str, ...] = field(default_factory=tuple)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class FingerprintSummary:
+    kind: str
+    input_paths: tuple[str, ...]
+    fingerprint_count: int
+    fingerprints: tuple[EmitterFingerprint, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class BaselineRecord:
+    baseline_id: str
+    approx_freq_hz: float | None
+    dominant_label: str
+    scans_seen: int
+    burst_count_mean: float
+    burst_count_max: int
+    duration_mean_s: float
+    duration_std_s: float
+    bandwidth_mean_hz: float
+    bandwidth_std_hz: float
+    duty_cycle_mean: float
+    confidence_mean: float
+    frequency_tolerance_hz: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class BaselineSummary:
+    kind: str
+    source_scan_paths: tuple[str, ...]
+    record_count: int
+    records: tuple[BaselineRecord, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class WatchAlert:
+    candidate_id: str
+    status: str
+    message: str
+    dominant_label: str
+    approx_freq_hz: float | None
+    baseline_id: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class WatchSummary:
+    kind: str
+    baseline_path: str
+    alert_count: int
+    new_count: int
+    changed_count: int
+    alerts: tuple[WatchAlert, ...]
+    scan: ScanSummary
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class AnalysisConfig:
     smoothing_samples: int = 256
     threshold_sigma: float = 6.0

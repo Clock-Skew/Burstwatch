@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections import Counter
 from pathlib import Path
 from typing import Sequence
 
+from .artifacts import write_json_document
 from .capture import load_capture
 from .models import AnalysisConfig
 from .pipeline import analyze_capture, summarize_events
 from .store import write_jsonl, write_sqlite
+from .workflows import build_baseline, build_fingerprints, scan_inputs, watch_against_baseline
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -93,6 +94,160 @@ def build_parser() -> argparse.ArgumentParser:
     )
     analyze.set_defaults(func=_analyze_command)
 
+    scan = subparsers.add_parser(
+        "scan",
+        help="Analyze one or more captures and cluster passive emitter candidates.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    _add_capture_inputs(scan, allow_multiple=True)
+    _add_analysis_options(scan)
+    scan.add_argument(
+        "--recursive",
+        action="store_true",
+        help="Recursively search directories for capture files",
+    )
+    scan.add_argument(
+        "--pattern",
+        action="append",
+        default=None,
+        help="Directory glob pattern. Repeatable",
+    )
+    scan.add_argument(
+        "--freq-bin-hz",
+        type=float,
+        default=25_000.0,
+        help="Emitter grouping width in Hz",
+    )
+    scan.add_argument(
+        "--json-out",
+        type=Path,
+        default=None,
+        help="Write a scan summary JSON document",
+    )
+    scan.add_argument(
+        "--event-jsonl",
+        type=Path,
+        default=None,
+        help="Write raw burst events as JSON Lines",
+    )
+    scan.add_argument(
+        "--event-sqlite",
+        type=Path,
+        default=None,
+        help="Write raw burst events to SQLite",
+    )
+    scan.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the full scan summary as JSON",
+    )
+    scan.set_defaults(func=_scan_command)
+
+    fingerprint = subparsers.add_parser(
+        "fingerprint",
+        help="Build passive RF fingerprints from one or more captures.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    _add_capture_inputs(fingerprint, allow_multiple=True)
+    _add_analysis_options(fingerprint)
+    fingerprint.add_argument(
+        "--recursive",
+        action="store_true",
+        help="Recursively search directories for capture files",
+    )
+    fingerprint.add_argument(
+        "--pattern",
+        action="append",
+        default=None,
+        help="Directory glob pattern. Repeatable",
+    )
+    fingerprint.add_argument(
+        "--freq-bin-hz",
+        type=float,
+        default=25_000.0,
+        help="Emitter grouping width in Hz",
+    )
+    fingerprint.add_argument(
+        "--name-prefix",
+        default="fp",
+        help="Prefix used for generated fingerprint IDs",
+    )
+    fingerprint.add_argument(
+        "--json-out",
+        type=Path,
+        default=None,
+        help="Write fingerprint JSON output",
+    )
+    fingerprint.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the full fingerprint summary as JSON",
+    )
+    fingerprint.set_defaults(func=_fingerprint_command)
+
+    baseline = subparsers.add_parser(
+        "baseline",
+        help="Build a baseline from one or more scan summary JSON files.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    baseline.add_argument("scan_json", nargs="+", type=Path, help="Scan summary JSON files")
+    baseline.add_argument(
+        "--freq-bin-hz",
+        type=float,
+        default=25_000.0,
+        help="Grouping width used when building baseline records",
+    )
+    baseline.add_argument(
+        "--json-out",
+        type=Path,
+        default=None,
+        help="Write baseline JSON output",
+    )
+    baseline.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the full baseline summary as JSON",
+    )
+    baseline.set_defaults(func=_baseline_command)
+
+    watch = subparsers.add_parser(
+        "watch",
+        help="Compare fresh passive scan results against a saved baseline.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    watch.add_argument("baseline_json", type=Path, help="Baseline JSON file")
+    _add_capture_inputs(watch, allow_multiple=True)
+    _add_analysis_options(watch)
+    watch.add_argument(
+        "--recursive",
+        action="store_true",
+        help="Recursively search directories for capture files",
+    )
+    watch.add_argument(
+        "--pattern",
+        action="append",
+        default=None,
+        help="Directory glob pattern. Repeatable",
+    )
+    watch.add_argument(
+        "--freq-bin-hz",
+        type=float,
+        default=25_000.0,
+        help="Emitter grouping width in Hz",
+    )
+    watch.add_argument(
+        "--json-out",
+        type=Path,
+        default=None,
+        help="Write watch JSON output",
+    )
+    watch.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the full watch report as JSON",
+    )
+    watch.set_defaults(func=_watch_command)
+
     return parser
 
 
@@ -110,15 +265,7 @@ def _analyze_command(args: argparse.Namespace) -> int:
         sample_format=args.format,
     )
 
-    min_burst_samples = max(1, int(round(capture.sample_rate_hz * args.min_burst_ms / 1000.0)))
-    merge_gap_samples = max(0, int(round(capture.sample_rate_hz * args.merge_gap_ms / 1000.0)))
-    config = AnalysisConfig(
-        smoothing_samples=max(1, int(args.smoothing_samples)),
-        threshold_sigma=float(args.threshold_sigma),
-        min_burst_samples=min_burst_samples,
-        merge_gap_samples=merge_gap_samples,
-        feature_window_count=max(2, int(args.feature_window_count)),
-    )
+    config = _config_from_args(args, capture.sample_rate_hz)
 
     events = analyze_capture(capture, config)
     if args.jsonl is not None:
@@ -151,3 +298,213 @@ def _print_summary(summary: dict[str, object]) -> None:
             f"slope={features['chirp_slope_hz_per_s']:.1f}"
         )
 
+
+def _scan_command(args: argparse.Namespace) -> int:
+    summary, events = scan_inputs(
+        [str(path) for path in args.inputs],
+        sample_rate_hz=args.sample_rate,
+        center_freq_hz=args.center_freq,
+        sample_format=args.format,
+        config_factory=lambda sample_rate_hz: _config_from_args(args, sample_rate_hz),
+        recursive=args.recursive,
+        patterns=_patterns_from_args(args),
+        freq_bin_hz=args.freq_bin_hz,
+    )
+    if args.event_jsonl is not None:
+        write_jsonl(events, args.event_jsonl)
+    if args.event_sqlite is not None:
+        write_sqlite(events, args.event_sqlite)
+    if args.json_out is not None:
+        write_json_document(summary.to_dict(), args.json_out)
+    if args.json:
+        print(json.dumps(summary.to_dict(), indent=2, sort_keys=True))
+        return 0
+    _print_scan_summary(summary.to_dict())
+    return 0
+
+
+def _fingerprint_command(args: argparse.Namespace) -> int:
+    scan_summary, _events = scan_inputs(
+        [str(path) for path in args.inputs],
+        sample_rate_hz=args.sample_rate,
+        center_freq_hz=args.center_freq,
+        sample_format=args.format,
+        config_factory=lambda sample_rate_hz: _config_from_args(args, sample_rate_hz),
+        recursive=args.recursive,
+        patterns=_patterns_from_args(args),
+        freq_bin_hz=args.freq_bin_hz,
+    )
+    summary = build_fingerprints(scan_summary, name_prefix=args.name_prefix)
+    if args.json_out is not None:
+        write_json_document(summary.to_dict(), args.json_out)
+    if args.json:
+        print(json.dumps(summary.to_dict(), indent=2, sort_keys=True))
+        return 0
+    _print_fingerprint_summary(summary.to_dict())
+    return 0
+
+
+def _baseline_command(args: argparse.Namespace) -> int:
+    summary = build_baseline([str(path) for path in args.scan_json], freq_bin_hz=args.freq_bin_hz)
+    if args.json_out is not None:
+        write_json_document(summary.to_dict(), args.json_out)
+    if args.json:
+        print(json.dumps(summary.to_dict(), indent=2, sort_keys=True))
+        return 0
+    _print_baseline_summary(summary.to_dict())
+    return 0
+
+
+def _watch_command(args: argparse.Namespace) -> int:
+    scan_summary, _events = scan_inputs(
+        [str(path) for path in args.inputs],
+        sample_rate_hz=args.sample_rate,
+        center_freq_hz=args.center_freq,
+        sample_format=args.format,
+        config_factory=lambda sample_rate_hz: _config_from_args(args, sample_rate_hz),
+        recursive=args.recursive,
+        patterns=_patterns_from_args(args),
+        freq_bin_hz=args.freq_bin_hz,
+    )
+    summary = watch_against_baseline(args.baseline_json, scan_summary)
+    if args.json_out is not None:
+        write_json_document(summary.to_dict(), args.json_out)
+    if args.json:
+        print(json.dumps(summary.to_dict(), indent=2, sort_keys=True))
+        return 0
+    _print_watch_summary(summary.to_dict())
+    return 0
+
+
+def _add_capture_inputs(parser: argparse.ArgumentParser, *, allow_multiple: bool) -> None:
+    parser.add_argument(
+        "inputs",
+        nargs="+" if allow_multiple else None,
+        type=Path,
+        help="Capture files or directories to analyze",
+    )
+
+
+def _add_analysis_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--sample-rate",
+        type=float,
+        default=None,
+        help="Sample rate in Hz for complex64 captures",
+    )
+    parser.add_argument(
+        "--center-freq",
+        type=float,
+        default=None,
+        help="Optional tuned center frequency in Hz",
+    )
+    parser.add_argument(
+        "--format",
+        choices=("auto", "complex64", "wav"),
+        default="auto",
+        help="Input sample format",
+    )
+    parser.add_argument(
+        "--smoothing-samples",
+        type=int,
+        default=256,
+        help="Moving-average window for burst detection",
+    )
+    parser.add_argument(
+        "--threshold-sigma",
+        type=float,
+        default=6.0,
+        help="Envelope threshold in scaled MAD units",
+    )
+    parser.add_argument(
+        "--min-burst-ms",
+        type=float,
+        default=1.0,
+        help="Minimum burst length in milliseconds",
+    )
+    parser.add_argument(
+        "--merge-gap-ms",
+        type=float,
+        default=0.5,
+        help="Merge gaps shorter than this many milliseconds",
+    )
+    parser.add_argument(
+        "--feature-window-count",
+        type=int,
+        default=8,
+        help="Number of windows used for chirp tracking",
+    )
+
+
+def _config_from_args(args: argparse.Namespace, sample_rate_hz: float) -> AnalysisConfig:
+    min_burst_samples = max(1, int(round(sample_rate_hz * args.min_burst_ms / 1000.0)))
+    merge_gap_samples = max(0, int(round(sample_rate_hz * args.merge_gap_ms / 1000.0)))
+    return AnalysisConfig(
+        smoothing_samples=max(1, int(args.smoothing_samples)),
+        threshold_sigma=float(args.threshold_sigma),
+        min_burst_samples=min_burst_samples,
+        merge_gap_samples=merge_gap_samples,
+        feature_window_count=max(2, int(args.feature_window_count)),
+    )
+
+
+def _patterns_from_args(args: argparse.Namespace) -> tuple[str, ...]:
+    if getattr(args, "pattern", None):
+        return tuple(args.pattern)
+    return ("*.c64", "*.wav")
+
+
+def _print_scan_summary(summary: dict[str, object]) -> None:
+    print(
+        f"inputs={len(summary['input_paths'])} events={summary['event_count']} "
+        f"emitters={summary['emitter_count']}"
+    )
+    print(f"labels={summary['label_counts']}")
+    for emitter in summary["emitters"]:
+        freq_text = "unknown" if emitter["approx_freq_hz"] is None else f"{emitter['approx_freq_hz']:.1f}Hz"
+        print(
+            f"{emitter['candidate_id']} freq={freq_text} label={emitter['dominant_label']} "
+            f"bursts={emitter['burst_count']} captures={emitter['capture_count']} "
+            f"bw={emitter['mean_bandwidth_hz']:.1f}Hz dur={emitter['mean_duration_s']:.4f}s"
+        )
+
+
+def _print_fingerprint_summary(summary: dict[str, object]) -> None:
+    print(f"inputs={len(summary['input_paths'])} fingerprints={summary['fingerprint_count']}")
+    for fingerprint in summary["fingerprints"]:
+        freq_text = (
+            "unknown" if fingerprint["approx_freq_hz"] is None else f"{fingerprint['approx_freq_hz']:.1f}Hz"
+        )
+        print(
+            f"{fingerprint['fingerprint_id']} freq={freq_text} label={fingerprint['dominant_label']} "
+            f"bursts={fingerprint['burst_count']} "
+            f"dur={fingerprint['duration_min_s']:.4f}-{fingerprint['duration_max_s']:.4f}s "
+            f"bw={fingerprint['bandwidth_min_hz']:.1f}-{fingerprint['bandwidth_max_hz']:.1f}Hz"
+        )
+
+
+def _print_baseline_summary(summary: dict[str, object]) -> None:
+    print(f"source_scans={len(summary['source_scan_paths'])} records={summary['record_count']}")
+    for record in summary["records"]:
+        freq_text = "unknown" if record["approx_freq_hz"] is None else f"{record['approx_freq_hz']:.1f}Hz"
+        print(
+            f"{record['baseline_id']} freq={freq_text} label={record['dominant_label']} "
+            f"scans={record['scans_seen']} tol={record['frequency_tolerance_hz']:.1f}Hz "
+            f"bw={record['bandwidth_mean_hz']:.1f}Hz dur={record['duration_mean_s']:.4f}s"
+        )
+
+
+def _print_watch_summary(summary: dict[str, object]) -> None:
+    print(
+        f"baseline={summary['baseline_path']} alerts={summary['alert_count']} "
+        f"new={summary['new_count']} changed={summary['changed_count']}"
+    )
+    if not summary["alerts"]:
+        print("no alerts")
+        return
+    for alert in summary["alerts"]:
+        freq_text = "unknown" if alert["approx_freq_hz"] is None else f"{alert['approx_freq_hz']:.1f}Hz"
+        print(
+            f"{alert['candidate_id']} status={alert['status']} freq={freq_text} "
+            f"label={alert['dominant_label']} msg={alert['message']}"
+        )
