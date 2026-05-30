@@ -282,10 +282,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     dashboard = subparsers.add_parser(
         "dashboard",
-        help="Show recent burstwatch JSON artifacts.",
+        help="Show saved burstwatch JSON outputs.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    dashboard.add_argument("root", nargs="?", type=Path, default=Path("runs"), help="Artifact root path")
+    dashboard.add_argument("root", nargs="?", type=Path, default=Path("runs"), help="Directory containing saved JSON outputs")
     dashboard.add_argument("--no-recursive", action="store_true", help="Only inspect the top-level directory")
     dashboard.add_argument("--limit", type=int, default=12, help="Maximum artifacts to show")
     dashboard.add_argument("--json", action="store_true", help="Print artifact dashboard as JSON")
@@ -655,7 +655,7 @@ def _print_watch_summary(summary: dict[str, object]) -> None:
 
 def _print_dashboard_summary(artifacts: list[ArtifactSummary]) -> None:
     if not artifacts:
-        print("no burstwatch JSON artifacts found")
+        print("No JSON yet.")
         return
     for artifact in artifacts:
         print(

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from contextlib import redirect_stdout
+import io
 import tempfile
 from pathlib import Path
 import unittest
 
+from burstwatch.cli import _print_dashboard_summary
 from burstwatch.artifacts import write_json_document
 from burstwatch.dashboard import summarize_artifacts
 
@@ -37,3 +40,9 @@ class DashboardTests(unittest.TestCase):
             self.assertEqual(len(artifacts), 2)
             self.assertEqual(artifact_types, {"scan", "watch"})
             self.assertTrue(any("emitters=2" in artifact.metric for artifact in artifacts))
+
+    def test_empty_dashboard_message_is_plain(self) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output):
+            _print_dashboard_summary([])
+        self.assertEqual(output.getvalue().strip(), "No JSON yet.")

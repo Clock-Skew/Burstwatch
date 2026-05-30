@@ -170,7 +170,7 @@ def _menu_actions() -> list[MenuAction]:
         MenuAction("4", "Build fingerprints", "Generate reusable passive RF fingerprints.", _run_fingerprint_menu),
         MenuAction("5", "Build baseline", "Learn normal emitter profiles from prior scan JSON.", _run_baseline_menu),
         MenuAction("6", "Watch against baseline", "Flag new or changed emitters from a fresh scan.", _run_watch_menu),
-        MenuAction("7", "Artifact dashboard", "Review recent captures, scans, baselines, and watch reports.", _run_dashboard_menu),
+        MenuAction("7", "Artifact dashboard", "Show saved JSON outputs from capture, scan, baseline, and watch.", _run_dashboard_menu),
         MenuAction("8", "Show help", "Display the command surface and menu guidance.", _run_help_menu),
         MenuAction("9", "Quit", "Exit the interactive menu.", lambda console: None),
     ]
@@ -341,7 +341,7 @@ def _run_help_menu(console: Console) -> None:
     table.add_row("fingerprint", "Build reusable profiles from emitters.")
     table.add_row("baseline", "Learn normal emitters from prior scans.")
     table.add_row("watch", "Compare a fresh scan against a saved baseline.")
-    table.add_row("dashboard", "Show recent burstwatch JSON artifacts.")
+    table.add_row("dashboard", "Show saved JSON outputs from prior commands.")
     table.add_row("menu", "Launch this guided Rich interface.")
     console.print(table)
 
@@ -615,7 +615,7 @@ def _print_dashboard_summary(console: Console, artifacts: list[ArtifactSummary])
     if not artifacts:
         console.print(
             Panel(
-                "No burstwatch JSON artifacts found.",
+                "No JSON yet.",
                 box=box.ROUNDED,
                 border_style="yellow",
                 expand=True,

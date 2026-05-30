@@ -56,6 +56,28 @@ Launch the guided terminal UI:
 burstwatch menu
 ```
 
+The dashboard does not scan the radio and it does not create files. It only shows saved `burstwatch` JSON outputs from `runs/`. If you open it before creating any JSON, it says:
+
+```text
+No JSON yet.
+```
+
+Create a first JSON artifact from an existing capture:
+
+```bash
+burstwatch scan captures/433/ \
+  --sample-rate 2400000 \
+  --center-freq 433920000 \
+  --recursive \
+  --json-out runs/433-scan.json
+```
+
+Then open the dashboard:
+
+```bash
+burstwatch dashboard runs
+```
+
 Record a short passive capture from an RTL-SDR dongle:
 
 ```bash
@@ -96,7 +118,7 @@ burstwatch scan captures/433/ \
   --event-sqlite runs/433-events.sqlite3
 ```
 
-Review saved artifacts:
+Review saved JSON outputs:
 
 ```bash
 burstwatch dashboard runs --limit 20
