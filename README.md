@@ -11,18 +11,7 @@ Burstwatch is a passive RF signal workspace for RTL-SDR users who want one place
 
 Burstwatch does not transmit. It does not claim to decode private traffic. It focuses on saved captures and reviewable local artifacts: burst timing, approximate bandwidth, signal-shape labels, repeated emitters, and changes against a known baseline.
 
-## Screenshots
-
-| View | Screenshot |
-| --- | --- |
-| Main menu | [![Burstwatch main menu](screencap/menu-home.png)](screencap/menu-home.png) |
-| Start a session | [![Burstwatch start a session](screencap/start-session.png)](screencap/start-session.png) |
-| Signal ideas | [![Burstwatch signal ideas](screencap/signal-ideas.png)](screencap/signal-ideas.png) |
-| Receiver tools | [![Burstwatch receiver tools](screencap/receiver-tools.png)](screencap/receiver-tools.png) |
-| Gqrx handoff | [![Burstwatch Gqrx handoff](screencap/gqrx-handoff.png)](screencap/gqrx-handoff.png) |
-| Baseline watch workflow | [![Burstwatch baseline watch](screencap/baseline-watch.png)](screencap/baseline-watch.png) |
-
-The full screenshot index is in [screencap/README.md](screencap/README.md).
+[![Burstwatch main menu](screencap/menu-home.png)](screencap/menu-home.png)
 
 ## Why Burstwatch
 
@@ -146,6 +135,18 @@ If you already have capture files:
 2. Choose `6 Open a capture`
 3. Point Burstwatch at a `.c64`, `.wav`, or a folder of captures
 4. Review the saved JSON outputs in `runs/`
+
+## Screens
+
+[![Burstwatch start a session](screencap/start-session.png)](screencap/start-session.png)
+
+[![Burstwatch signal ideas](screencap/signal-ideas.png)](screencap/signal-ideas.png)
+
+[![Burstwatch receiver tools](screencap/receiver-tools.png)](screencap/receiver-tools.png)
+
+[![Burstwatch Gqrx handoff](screencap/gqrx-handoff.png)](screencap/gqrx-handoff.png)
+
+[![Burstwatch baseline watch](screencap/baseline-watch.png)](screencap/baseline-watch.png)
 
 ## Menu Walkthrough
 
@@ -275,13 +276,10 @@ Repository layout:
 
 ```text
 burstwatch/
-├── captures/
-├── runs/
-├── screencap/
 ├── src/burstwatch/
 ├── tests/
+├── screencap/
 ├── README.md
-├── ROADMAP.md
 ├── LICENSE
 └── pyproject.toml
 ```
@@ -461,8 +459,6 @@ Run compile checks:
 ```bash
 PYTHONPATH=src python3 -m compileall src tests
 ```
-
-See [ROADMAP.md](ROADMAP.md) for the planned direction.
 
 ## License
 
