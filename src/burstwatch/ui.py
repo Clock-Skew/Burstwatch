@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+import shutil
 import sys
 from typing import Callable
 
@@ -202,7 +203,7 @@ SIGNAL_PATHS = (
 
 
 def run_menu() -> int:
-    console = Console()
+    console = _build_menu_console()
     actions = _menu_actions()
     while True:
         _screen_break(console)
@@ -220,6 +221,20 @@ def run_menu() -> int:
         except Exception as exc:  # pragma: no cover - defensive UI path
             console.print(f"[bold red]Error:[/bold red] {exc}")
         _pause(console)
+
+
+def _build_menu_console() -> Console:
+    # Keep the interactive menu on plain terminal output so keypad / Num Lock
+    # behavior is never affected by terminal styling or live-render features.
+    width = shutil.get_terminal_size((100, 30)).columns
+    return Console(
+        width=width,
+        no_color=True,
+        highlight=False,
+        soft_wrap=True,
+        emoji=False,
+        force_terminal=False,
+    )
 
 
 def render_menu_screen(console: Console, actions: list[MenuAction]):
@@ -383,8 +398,8 @@ def _run_capture_menu(console: Console, preset: BandPreset | None = None) -> Non
         rtl_sdr_path=rtl_sdr_path,
         keep_raw_path=keep_raw_path,
     )
-    with console.status("Recording passive IQ and converting to complex64...", spinner="dots"):
-        result = record_rtl_sdr_capture(request)
+    console.print("Recording passive IQ and converting to complex64...")
+    result = record_rtl_sdr_capture(request)
 
     _print_capture_summary(console, result.to_dict())
     metadata_path = _default_artifact_path(output_path, "capture")
@@ -691,18 +706,18 @@ def _scan_saved_capture_with_defaults(
     center_freq_hz: float | None,
     freq_bin_hz: float,
 ) -> None:
-    with console.status("Scanning saved capture and writing result files...", spinner="dots"):
-        summary, events = scan_inputs(
-            [capture_path],
-            sample_rate_hz=sample_rate_hz,
-            center_freq_hz=center_freq_hz,
-            sample_format="complex64",
-            config_factory=lambda actual_sample_rate_hz: _analysis_config_from_prompt_values(
-                DEFAULT_ANALYSIS_CONFIG,
-                actual_sample_rate_hz,
-            ),
-            freq_bin_hz=freq_bin_hz,
-        )
+    console.print("Scanning saved capture and writing result files...")
+    summary, events = scan_inputs(
+        [capture_path],
+        sample_rate_hz=sample_rate_hz,
+        center_freq_hz=center_freq_hz,
+        sample_format="complex64",
+        config_factory=lambda actual_sample_rate_hz: _analysis_config_from_prompt_values(
+            DEFAULT_ANALYSIS_CONFIG,
+            actual_sample_rate_hz,
+        ),
+        freq_bin_hz=freq_bin_hz,
+    )
     _print_scan_summary(console, summary.to_dict())
     scan_path = _default_artifact_path(capture_path, "scan")
     event_path = _default_artifact_path(capture_path, "events", ".jsonl")
