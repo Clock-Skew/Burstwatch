@@ -224,16 +224,17 @@ def run_menu() -> int:
 
 
 def _build_menu_console() -> Console:
-    # Keep the interactive menu on plain terminal output so keypad / Num Lock
-    # behavior is never affected by terminal styling or live-render features.
+    # Keep the interactive menu on simple styled terminal output only. Avoid
+    # line-editing and live-render features, but allow static ANSI styling so
+    # the menu still has color.
     width = shutil.get_terminal_size((100, 30)).columns
     return Console(
         width=width,
-        no_color=True,
+        color_system="standard",
         highlight=False,
         soft_wrap=True,
         emoji=False,
-        force_terminal=False,
+        force_terminal=True,
     )
 
 
