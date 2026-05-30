@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 import json
 import sqlite3
 from pathlib import Path
@@ -23,7 +24,7 @@ def write_jsonl(events: Iterable[BurstEvent], path: str | Path) -> int:
 def write_sqlite(events: Iterable[BurstEvent], path: str | Path) -> int:
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(destination) as connection:
+    with closing(sqlite3.connect(destination)) as connection:
         _ensure_schema(connection)
         count = 0
         for event in events:
@@ -87,4 +88,3 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
     connection.execute(
         "CREATE INDEX IF NOT EXISTS idx_bursts_label ON bursts(label)"
     )
-

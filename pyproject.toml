@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "burstwatch"
 version = "0.1.0"
-description = "Passive RF burst detector and shape classifier for owned or authorized captures."
+description = "Passive RF signal workspace for RTL-SDR captures, burst discovery, and baseline watching."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -36,8 +36,9 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Clock-Skew/burstwatch"
-Issues = "https://github.com/Clock-Skew/burstwatch/issues"
+Homepage = "https://github.com/Clock-Skew/Burstwatch"
+Source = "https://github.com/Clock-Skew/Burstwatch"
+Issues = "https://github.com/Clock-Skew/Burstwatch/issues"
 
 [project.scripts]
 burstwatch = "burstwatch.cli:main"

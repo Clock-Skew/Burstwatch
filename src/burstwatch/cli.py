@@ -19,7 +19,7 @@ from .workflows import build_baseline, build_fingerprints, scan_inputs, watch_ag
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="burstwatch",
-        description="Passive RF burst detector and shape classifier.",
+        description="Passive RF signal workspace for saved captures, burst discovery, and baseline watching.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     subparsers = parser.add_subparsers(dest="command", required=True)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 import json
 import sqlite3
 import tempfile
@@ -34,10 +35,9 @@ class PipelineTests(unittest.TestCase):
             payload = json.loads(lines[0])
             self.assertIn("label", payload)
 
-            with sqlite3.connect(sqlite_path) as connection:
+            with closing(sqlite3.connect(sqlite_path)) as connection:
                 row_count = connection.execute("SELECT COUNT(*) FROM bursts").fetchone()[0]
             self.assertEqual(row_count, len(events))
 
             summary = summarize_events(capture, events)
             self.assertIn("burst_count", summary)
-
