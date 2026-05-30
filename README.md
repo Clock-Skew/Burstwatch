@@ -7,7 +7,7 @@
 [![NumPy](https://img.shields.io/badge/NumPy-signal%20arrays-013243?logo=numpy&logoColor=white)](https://numpy.org/)
 [![License MIT](https://img.shields.io/badge/License-MIT-2EA44F.svg)](https://opensource.org/license/mit)
 
-`burstwatch` is a passive RF burst analysis toolkit for saved SDR captures. It helps you record or import IQ files, find burst activity, classify rough signal shapes, cluster likely emitters, build fingerprints, learn a baseline, and compare later captures for new or changed RF activity.
+`burstwatch` is a guided passive RF dashboard for learning what your own SDR can see. It can launch helper tools, record a short capture, scan it, save the results, and show the next useful step from one terminal menu.
 
 It is designed for owned hardware, lab devices, and authorized research. It does not transmit. It does not decode private traffic. It does not make third-party systems yours to inspect.
 
@@ -17,16 +17,29 @@ Use `burstwatch` only with your own equipment, your own lab captures, public/bro
 
 The project intentionally works from saved captures and passive metadata: frequency, burst timing, approximate bandwidth, rough signal shape, repetition patterns, and changes against a baseline.
 
-## Features
+## What You Do
 
-- `capture`: record passive RTL-SDR IQ to `complex64`, then optionally analyze or scan it
-- `analyze`: classify bursts in one IQ or WAV capture
-- `scan`: cluster bursts into passive emitter candidates
-- `fingerprint`: derive reusable passive RF fingerprints
-- `baseline`: learn normal emitter profiles from prior scans
-- `watch`: compare a fresh scan against a saved baseline
-- `dashboard`: summarize recent `burstwatch` JSON artifacts
-- `menu`: launch the responsive Rich terminal menu with a multicolor ASCII banner
+Use the menu first:
+
+```bash
+burstwatch menu
+```
+
+Then choose:
+
+- `1 Start here` for a guided first run
+- `2 Guided dashboard` to see saved results and recommended next actions
+- `3 Tools and receivers` to test RTL-SDR or launch Gqrx / GNU Radio
+
+The menu handles the normal handoff:
+
+- records or accepts a capture
+- scans the capture
+- saves dashboard JSON into `runs/`
+- saves raw burst events into `runs/`
+- sends you back to the dashboard
+
+The lower-level commands still exist for advanced users, but they are not the main workflow.
 
 ## Install
 
@@ -46,39 +59,82 @@ sudo apt update
 sudo apt install -y rtl-sdr gnuradio gqrx-sdr
 ```
 
-`rtl_sdr` is only needed for the `capture` command. GNU Radio and Gqrx are useful for recording, inspecting, and exporting captures before handing files to `burstwatch`.
+`rtl_sdr` is used for guided recording. Gqrx and GNU Radio Companion can be opened from the Burstwatch menu when installed.
 
 ## Quick Start
 
-Launch the guided terminal UI:
+Start here:
 
 ```bash
 burstwatch menu
 ```
 
-The dashboard does not scan the radio and it does not create files. It only shows saved `burstwatch` JSON outputs from `runs/`. If you open it before creating any JSON, it says:
+Choose `1 Start here`.
+
+For a first RTL-SDR run, the menu will:
+
+- show the legal/passive boundary
+- check whether helper tools are installed
+- optionally run `rtl_test`
+- ask for a common band or custom frequency
+- record a short passive IQ capture
+- scan it automatically
+- write results into `captures/` and `runs/`
+- show the next dashboard step
+
+If you already have a capture, choose `5 Use saved capture`. Burstwatch will ask for the file or folder, scan it, and write dashboard files for you.
+
+## Dashboard
+
+The dashboard is the home screen for results. It reads saved outputs from `runs/`.
+
+If nothing has been saved yet, it says:
 
 ```text
 No JSON yet.
 ```
 
-Create a first JSON artifact from an existing capture:
+That means: run `Start here`, `Record and scan`, or `Use saved capture` first.
+
+After a guided scan, use:
 
 ```bash
-burstwatch scan captures/433/ \
-  --sample-rate 2400000 \
-  --center-freq 433920000 \
-  --recursive \
-  --json-out runs/433-scan.json
+burstwatch menu
 ```
 
-Then open the dashboard:
+Then choose `2 Guided dashboard`.
 
-```bash
-burstwatch dashboard runs
-```
+## Tool Launcher
 
-Record a short passive capture from an RTL-SDR dongle:
+Choose `3 Tools and receivers` from the menu to:
+
+- run `rtl_test`
+- open Gqrx
+- open GNU Radio Companion
+- see install commands for missing tools
+
+This keeps third-party tools inside the guided workflow instead of making you remember separate commands.
+
+## What Files Mean
+
+Burstwatch uses two main folders:
+
+- `captures/`: saved radio captures, usually `.c64`
+- `runs/`: saved dashboard outputs, usually `.json` and `.jsonl`
+
+Common saved files:
+
+- `*-capture.json`: metadata for a recording
+- `*-scan.json`: emitter candidates found in a capture
+- `*-events.jsonl`: one burst event per line
+- `baseline.json`: normal activity learned from scan files
+- `*-watch.json`: new or changed activity compared to a baseline
+
+## Manual Commands
+
+The menu is the intended path. These commands are for repeatable or advanced use.
+
+Record a short passive capture:
 
 ```bash
 burstwatch capture captures/433920000-lab.c64 \
@@ -88,14 +144,20 @@ burstwatch capture captures/433920000-lab.c64 \
   --metadata-json runs/433-capture.json
 ```
 
-Record, then immediately scan the saved file:
+Scan a saved capture or folder:
 
 ```bash
-burstwatch capture captures/433920000-lab.c64 \
-  --center-freq 433920000 \
+burstwatch scan captures/433/ \
   --sample-rate 2400000 \
-  --duration 10 \
-  --then scan
+  --center-freq 433920000 \
+  --recursive \
+  --json-out runs/433-scan.json
+```
+
+Review saved outputs:
+
+```bash
+burstwatch dashboard runs
 ```
 
 Analyze one saved IQ capture:
@@ -106,25 +168,9 @@ burstwatch analyze captures/433920000-lab.c64 \
   --center-freq 433920000
 ```
 
-Scan a directory of captures:
-
-```bash
-burstwatch scan captures/433/ \
-  --sample-rate 2400000 \
-  --center-freq 433920000 \
-  --recursive \
-  --json-out runs/433-scan.json \
-  --event-jsonl runs/433-events.jsonl \
-  --event-sqlite runs/433-events.sqlite3
-```
-
-Review saved JSON outputs:
-
-```bash
-burstwatch dashboard runs --limit 20
-```
-
 ## GNU Radio Handoff
+
+The menu can open GNU Radio Companion from `3 Tools and receivers`.
 
 `burstwatch` expects raw `complex64` IQ or WAV input. In GNU Radio Companion, a simple file-first flow is:
 
@@ -134,7 +180,9 @@ RTL-SDR Source
 -> File Sink
 ```
 
-Set the file sink to write complex samples, record a short capture, then analyze it:
+Set the file sink to write complex samples, record a short capture, then return to `burstwatch menu` and choose `5 Use saved capture`.
+
+Manual scan:
 
 ```bash
 burstwatch scan captures/gnu-radio-step.c64 \

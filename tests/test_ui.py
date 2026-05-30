@@ -15,6 +15,7 @@ class UiTests(unittest.TestCase):
         self.assertIn("menu", help_text)
         self.assertIn("capture", help_text)
         self.assertIn("dashboard", help_text)
+        self.assertIn("tools", help_text)
 
     def test_render_header_wide_console(self) -> None:
         console = Console(width=100, record=True)
@@ -30,3 +31,4 @@ class UiTests(unittest.TestCase):
         console.print(screen)
         output = console.export_text()
         self.assertIn("Passive RF workflow menu", output)
+        self.assertIn("New users: choose 1", output)

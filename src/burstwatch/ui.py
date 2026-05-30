@@ -20,6 +20,7 @@ from .models import AnalysisConfig
 from .pipeline import analyze_capture, summarize_events
 from .recording import RtlSdrCaptureRequest, record_rtl_sdr_capture
 from .store import write_jsonl, write_sqlite
+from .tools import ToolStatus, launch_tool, run_tool_check, tool_statuses
 from .workflows import build_baseline, build_fingerprints, scan_inputs, watch_against_baseline
 
 BANNER = """
@@ -47,6 +48,31 @@ class AnalysisPromptValues:
     min_burst_ms: float
     merge_gap_ms: float
     feature_window_count: int
+
+
+@dataclass(frozen=True)
+class GuidedPreset:
+    key: str
+    label: str
+    center_freq_hz: float
+    sample_rate_hz: float = 2_400_000.0
+    duration_s: float = 10.0
+    freq_bin_hz: float = 25_000.0
+
+
+BEGINNER_CONFIG = AnalysisPromptValues(
+    smoothing_samples=256,
+    threshold_sigma=6.0,
+    min_burst_ms=1.0,
+    merge_gap_ms=0.5,
+    feature_window_count=8,
+)
+
+GUIDED_PRESETS = (
+    GuidedPreset("1", "433.92 MHz ISM sensors/remotes", 433_920_000.0),
+    GuidedPreset("2", "915 MHz US ISM sensors", 915_000_000.0),
+    GuidedPreset("3", "315 MHz low-power devices", 315_000_000.0),
+)
 
 
 def run_menu() -> int:
@@ -96,7 +122,7 @@ def render_menu_screen(console: Console, actions: list[MenuAction]):
             table.add_row(action.key, action.title)
 
     footer = Panel(
-        Text("Use the scripted subcommands for automation. Use the menu for guided runs.", style="bright_black"),
+        Text("New users: choose 1. The menu creates captures, scans, and dashboard files for you.", style="bright_black"),
         box=box.ROUNDED,
         border_style="blue",
         expand=True,
@@ -164,29 +190,59 @@ def _render_banner() -> Panel:
 
 def _menu_actions() -> list[MenuAction]:
     return [
-        MenuAction("1", "Record passive capture", "Use rtl_sdr to save IQ, then optionally analyze or scan.", _run_capture_menu),
-        MenuAction("2", "Analyze one capture", "Classify bursts in a single IQ or WAV file.", _run_analyze_menu),
-        MenuAction("3", "Scan captures", "Cluster bursts into passive emitter candidates.", _run_scan_menu),
-        MenuAction("4", "Build fingerprints", "Generate reusable passive RF fingerprints.", _run_fingerprint_menu),
-        MenuAction("5", "Build baseline", "Learn normal emitter profiles from prior scan JSON.", _run_baseline_menu),
-        MenuAction("6", "Watch against baseline", "Flag new or changed emitters from a fresh scan.", _run_watch_menu),
-        MenuAction("7", "Artifact dashboard", "Show saved JSON outputs from capture, scan, baseline, and watch.", _run_dashboard_menu),
-        MenuAction("8", "Show help", "Display the command surface and menu guidance.", _run_help_menu),
+        MenuAction("1", "Start here", "Guided first run with defaults, automatic scan output, and next steps.", _run_start_here_menu),
+        MenuAction("2", "Guided dashboard", "Show current project state and the next useful action.", _run_dashboard_menu),
+        MenuAction("3", "Tools and receivers", "Check, test, or launch rtl_sdr, Gqrx, and GNU Radio.", _run_tools_menu),
+        MenuAction("4", "Record and scan", "Record from RTL-SDR, save files, scan, and return to dashboard.", _run_capture_menu),
+        MenuAction("5", "Use saved capture", "Analyze or scan an existing IQ/WAV file with guided defaults.", _run_existing_capture_menu),
+        MenuAction("6", "Baseline and watch", "Build a baseline or compare fresh captures against one.", _run_baseline_watch_menu),
+        MenuAction("7", "Advanced workflows", "Manual analyze, scan, fingerprint, baseline, and watch commands.", _run_advanced_menu),
+        MenuAction("8", "Show help", "Plain-language explanation of the workflow and tools.", _run_help_menu),
         MenuAction("9", "Quit", "Exit the interactive menu.", lambda console: None),
     ]
 
 
-def _run_capture_menu(console: Console) -> None:
-    center_freq_hz = FloatPrompt.ask("Center frequency Hz", default=433_920_000.0, console=console)
-    sample_rate_hz = FloatPrompt.ask("Sample rate Hz", default=2_400_000.0, console=console)
-    duration_s = FloatPrompt.ask("Duration seconds", default=5.0, console=console)
-    output_path = Path(
-        Prompt.ask(
-            "Output complex64 path",
-            default=str(_default_capture_path(center_freq_hz)),
-            console=console,
-        )
+def _run_start_here_menu(console: Console) -> None:
+    _print_beginner_boundary(console)
+    _print_tool_statuses(console, tool_statuses())
+    table = Table(box=box.SIMPLE_HEAVY, expand=True, header_style="bold bright_cyan")
+    table.add_column("Key", style="bold yellow", width=4, no_wrap=True)
+    table.add_column("Path", style="bold white")
+    table.add_column("Use when", style="bright_black")
+    table.add_row("1", "Record with RTL-SDR", "The USB SDR is plugged in and you want a fresh capture.")
+    table.add_row("2", "Use an existing capture", "You already have a .c64 or .wav file/folder.")
+    table.add_row("3", "Open Gqrx", "You want to visually explore the spectrum first.")
+    table.add_row("4", "Open GNU Radio", "You want to build or edit a capture flowgraph.")
+    table.add_row("5", "Return", "Go back to the main menu.")
+    console.print(table)
+    choice = Prompt.ask(
+        "What do you want to do?",
+        choices=["1", "2", "3", "4", "5"],
+        default="1",
+        console=console,
     )
+    if choice == "1":
+        _run_capture_menu(console)
+    elif choice == "2":
+        _run_existing_capture_menu(console)
+    elif choice == "3":
+        _launch_tool_from_menu(console, "gqrx")
+    elif choice == "4":
+        _launch_tool_from_menu(console, "gnuradio")
+    else:
+        return
+
+
+def _run_capture_menu(console: Console) -> None:
+    if not _require_tool(console, "rtl_sdr"):
+        return
+    if Confirm.ask("Run USB SDR hardware test first?", default=True, console=console):
+        _run_rtl_test(console)
+    preset = _ask_guided_preset(console)
+    center_freq_hz = preset.center_freq_hz
+    sample_rate_hz = FloatPrompt.ask("Sample rate Hz", default=preset.sample_rate_hz, console=console)
+    duration_s = FloatPrompt.ask("Duration seconds", default=preset.duration_s, console=console)
+    output_path = _ask_path_default(console, "Saved IQ capture path", _default_capture_path(center_freq_hz))
     gain = Prompt.ask("Gain", default="auto", console=console)
     device_index = IntPrompt.ask("RTL-SDR device index", default=0, console=console)
     ppm = _ask_optional_int(console, "PPM correction", default="")
@@ -210,52 +266,114 @@ def _run_capture_menu(console: Console) -> None:
         result = record_rtl_sdr_capture(request)
 
     _print_capture_summary(console, result.to_dict())
-    if Confirm.ask("Write capture metadata JSON?", default=True, console=console):
-        write_json_document(
-            result.to_dict(),
-            _ask_path_default(console, "Metadata JSON path", _default_artifact_path(output_path, "capture")),
-        )
+    metadata_path = _default_artifact_path(output_path, "capture")
+    write_json_document(result.to_dict(), metadata_path)
+    console.print(f"[green]Saved capture metadata:[/green] {metadata_path}")
+    _scan_saved_capture_with_defaults(
+        console,
+        result.output_path,
+        sample_rate_hz=result.sample_rate_hz,
+        center_freq_hz=result.center_freq_hz,
+        freq_bin_hz=preset.freq_bin_hz,
+    )
+    _print_next_steps(console)
 
-    follow_up = Prompt.ask(
-        "Next step",
-        choices=["none", "analyze", "scan"],
-        default="analyze",
+
+def _run_existing_capture_menu(console: Console) -> None:
+    capture_path = Path(_ask_required(console, "Capture file or folder"))
+    sample_format = Prompt.ask(
+        "Input format",
+        choices=["auto", "complex64", "wav"],
+        default="auto",
         console=console,
     )
-    if follow_up == "analyze":
-        prompt_values = _prompt_analysis_values(console)
-        capture = load_capture(
-            result.output_path,
-            sample_rate_hz=result.sample_rate_hz,
-            center_freq_hz=result.center_freq_hz,
-            sample_format="complex64",
-        )
-        config = _analysis_config_from_prompt_values(prompt_values, capture.sample_rate_hz)
-        events = analyze_capture(capture, config)
-        _print_analyze_summary(console, summarize_events(capture, events))
-    elif follow_up == "scan":
-        prompt_values = _prompt_analysis_values(console)
-        summary, events = scan_inputs(
-            [result.output_path],
-            sample_rate_hz=result.sample_rate_hz,
-            center_freq_hz=result.center_freq_hz,
-            sample_format="complex64",
-            config_factory=lambda actual_sample_rate_hz: _analysis_config_from_prompt_values(
-                prompt_values,
-                actual_sample_rate_hz,
-            ),
-        )
-        _print_scan_summary(console, summary.to_dict())
-        if Confirm.ask("Write scan summary JSON?", default=True, console=console):
-            write_json_document(
-                summary.to_dict(),
-                _ask_path_default(console, "Summary JSON path", _default_artifact_path(output_path, "scan")),
-            )
-        if Confirm.ask("Write raw event JSONL?", default=False, console=console):
-            write_jsonl(
-                events,
-                _ask_path_default(console, "Event JSONL path", _default_artifact_path(output_path, "events", ".jsonl")),
-            )
+    sample_rate_hz = None
+    if sample_format != "wav":
+        sample_rate_hz = FloatPrompt.ask("Sample rate Hz", default=2_400_000.0, console=console)
+    center_freq_hz = _ask_optional_float(console, "Center frequency Hz", default="")
+    freq_bin_hz = FloatPrompt.ask("Frequency grouping Hz", default=25_000.0, console=console)
+    recursive = capture_path.is_dir()
+    summary, events = scan_inputs(
+        [capture_path],
+        sample_rate_hz=sample_rate_hz,
+        center_freq_hz=center_freq_hz,
+        sample_format=sample_format,
+        config_factory=lambda actual_sample_rate_hz: _analysis_config_from_prompt_values(
+            BEGINNER_CONFIG,
+            actual_sample_rate_hz,
+        ),
+        recursive=recursive,
+        freq_bin_hz=freq_bin_hz,
+    )
+    _print_scan_summary(console, summary.to_dict())
+    scan_path = _default_artifact_path(_artifact_source_stem(capture_path), "scan")
+    event_path = _default_artifact_path(_artifact_source_stem(capture_path), "events", ".jsonl")
+    write_json_document(summary.to_dict(), scan_path)
+    write_jsonl(events, event_path)
+    console.print(f"[green]Saved dashboard JSON:[/green] {scan_path}")
+    console.print(f"[green]Saved burst events:[/green] {event_path}")
+    _print_next_steps(console)
+
+
+def _run_baseline_watch_menu(console: Console) -> None:
+    table = Table(box=box.SIMPLE_HEAVY, expand=True, header_style="bold bright_cyan")
+    table.add_column("Key", style="bold yellow", width=4, no_wrap=True)
+    table.add_column("Workflow", style="bold white")
+    table.add_column("Meaning", style="bright_black")
+    table.add_row("1", "Build baseline", "Learn what normal looks like from saved scan JSON.")
+    table.add_row("2", "Watch against baseline", "Compare a new capture set against a saved baseline.")
+    table.add_row("3", "Return", "Go back.")
+    console.print(table)
+    choice = Prompt.ask(
+        "Baseline workflow",
+        choices=["1", "2", "3"],
+        default="1",
+        console=console,
+    )
+    if choice == "1":
+        scan_paths = _recent_artifact_paths("scan")
+        if not scan_paths:
+            console.print("[yellow]No scan JSON found yet. Run Start here or Use saved capture first.[/yellow]")
+            return
+        baseline_path = Path("runs") / "baseline.json"
+        summary = build_baseline(scan_paths)
+        write_json_document(summary.to_dict(), baseline_path)
+        _print_baseline_summary(console, summary.to_dict())
+        console.print(f"[green]Saved baseline:[/green] {baseline_path}")
+    elif choice == "2":
+        _run_watch_menu(console)
+    else:
+        return
+
+
+def _run_advanced_menu(console: Console) -> None:
+    table = Table(box=box.SIMPLE_HEAVY, expand=True, header_style="bold bright_cyan")
+    table.add_column("Key", style="bold yellow", width=4, no_wrap=True)
+    table.add_column("Advanced action", style="bold white")
+    table.add_row("1", "Analyze one capture")
+    table.add_row("2", "Scan captures")
+    table.add_row("3", "Build fingerprints")
+    table.add_row("4", "Build baseline")
+    table.add_row("5", "Watch against baseline")
+    table.add_row("6", "Return")
+    console.print(table)
+    choice = Prompt.ask(
+        "Advanced workflow",
+        choices=["1", "2", "3", "4", "5", "6"],
+        default="1",
+        console=console,
+    )
+    if choice == "1":
+        _run_analyze_menu(console)
+    elif choice == "2":
+        _run_scan_menu(console)
+    elif choice == "3":
+        _run_fingerprint_menu(console)
+    elif choice == "4":
+        _run_baseline_menu(console)
+    elif choice == "5":
+        _run_watch_menu(console)
+
 
 
 def _run_analyze_menu(console: Console) -> None:
@@ -324,26 +442,77 @@ def _run_watch_menu(console: Console) -> None:
 
 
 def _run_dashboard_menu(console: Console) -> None:
-    root = Path(Prompt.ask("Artifact root path", default="runs", console=console))
-    recursive = Confirm.ask("Recurse into subdirectories?", default=True, console=console)
-    limit = IntPrompt.ask("Maximum artifacts", default=12, console=console)
-    artifacts = summarize_artifacts(root, recursive=recursive, limit=limit)
+    root = Path("runs")
+    artifacts = summarize_artifacts(root, recursive=True, limit=12)
+    console.print(
+        Panel(
+            "This dashboard reads saved Burstwatch outputs. It does not scan by itself.",
+            box=box.ROUNDED,
+            border_style="bright_blue",
+            expand=True,
+        )
+    )
     _print_dashboard_summary(console, artifacts)
+    _print_tool_statuses(console, tool_statuses())
+    if artifacts:
+        _print_dashboard_choices(console, with_artifacts=True)
+        choice = Prompt.ask("Next action", choices=["1", "2", "3", "4"], default="1", console=console)
+        if choice == "1":
+            _run_capture_menu(console)
+        elif choice == "2":
+            _run_baseline_watch_menu(console)
+        elif choice == "3":
+            _run_existing_capture_menu(console)
+        return
+
+    _print_dashboard_choices(console, with_artifacts=False)
+    choice = Prompt.ask("Next action", choices=["1", "2", "3"], default="1", console=console)
+    if choice == "1":
+        _run_start_here_menu(console)
+    elif choice == "2":
+        _run_tools_menu(console)
 
 
 def _run_help_menu(console: Console) -> None:
+    console.print(
+        Panel(
+            (
+                "Normal path:\n"
+                "1. Start here\n"
+                "2. Record with RTL-SDR or choose an existing capture\n"
+                "3. Burstwatch saves scan JSON in runs/\n"
+                "4. Dashboard shows what was found and what to do next\n\n"
+                "Use Tools and receivers to open Gqrx, GNU Radio Companion, or rtl_test."
+            ),
+            title="How Burstwatch Works",
+            box=box.ROUNDED,
+            border_style="bright_blue",
+            expand=True,
+        )
+    )
+
+
+def _run_tools_menu(console: Console) -> None:
+    statuses = tool_statuses()
+    _print_tool_statuses(console, statuses)
     table = Table(box=box.SIMPLE_HEAVY, expand=True, header_style="bold bright_cyan")
-    table.add_column("Command", style="bold yellow", ratio=2)
-    table.add_column("Purpose", style="white", ratio=4)
-    table.add_row("capture", "Record RTL-SDR IQ to complex64, then optionally analyze or scan.")
-    table.add_row("analyze", "Classify bursts in one capture.")
-    table.add_row("scan", "Group bursts into passive emitter candidates.")
-    table.add_row("fingerprint", "Build reusable profiles from emitters.")
-    table.add_row("baseline", "Learn normal emitters from prior scans.")
-    table.add_row("watch", "Compare a fresh scan against a saved baseline.")
-    table.add_row("dashboard", "Show saved JSON outputs from prior commands.")
-    table.add_row("menu", "Launch this guided Rich interface.")
+    table.add_column("Key", style="bold yellow", width=4, no_wrap=True)
+    table.add_column("Action", style="white")
+    table.add_row("1", "Run RTL-SDR hardware test")
+    table.add_row("2", "Open Gqrx visual receiver")
+    table.add_row("3", "Open GNU Radio Companion")
+    table.add_row("4", "Show install commands")
+    table.add_row("5", "Return")
     console.print(table)
+    choice = Prompt.ask("Tool action", choices=["1", "2", "3", "4", "5"], default="1", console=console)
+    if choice == "1":
+        _run_rtl_test(console)
+    elif choice == "2":
+        _launch_tool_from_menu(console, "gqrx")
+    elif choice == "3":
+        _launch_tool_from_menu(console, "gnuradio")
+    elif choice == "4":
+        _print_install_hints(console, statuses)
 
 
 def _prompt_scan(console: Console):
@@ -371,6 +540,176 @@ def _prompt_scan(console: Console):
         recursive=recursive,
         freq_bin_hz=freq_bin_hz,
     )
+
+
+def _scan_saved_capture_with_defaults(
+    console: Console,
+    capture_path: Path,
+    *,
+    sample_rate_hz: float,
+    center_freq_hz: float | None,
+    freq_bin_hz: float,
+) -> None:
+    with console.status("Scanning saved capture and writing dashboard files...", spinner="dots"):
+        summary, events = scan_inputs(
+            [capture_path],
+            sample_rate_hz=sample_rate_hz,
+            center_freq_hz=center_freq_hz,
+            sample_format="complex64",
+            config_factory=lambda actual_sample_rate_hz: _analysis_config_from_prompt_values(
+                BEGINNER_CONFIG,
+                actual_sample_rate_hz,
+            ),
+            freq_bin_hz=freq_bin_hz,
+        )
+    _print_scan_summary(console, summary.to_dict())
+    scan_path = _default_artifact_path(capture_path, "scan")
+    event_path = _default_artifact_path(capture_path, "events", ".jsonl")
+    write_json_document(summary.to_dict(), scan_path)
+    write_jsonl(events, event_path)
+    console.print(f"[green]Saved dashboard JSON:[/green] {scan_path}")
+    console.print(f"[green]Saved burst events:[/green] {event_path}")
+
+
+def _ask_guided_preset(console: Console) -> GuidedPreset:
+    table = Table(box=box.SIMPLE_HEAVY, expand=True, header_style="bold bright_cyan")
+    table.add_column("Key", style="bold yellow", width=4, no_wrap=True)
+    table.add_column("Band", style="bold white")
+    table.add_column("Center", justify="right", style="cyan")
+    for preset in GUIDED_PRESETS:
+        table.add_row(preset.key, preset.label, f"{preset.center_freq_hz / 1_000_000:.3f} MHz")
+    table.add_row("4", "Custom frequency", "manual")
+    console.print(table)
+    choice = Prompt.ask("Choose band", choices=["1", "2", "3", "4"], default="1", console=console)
+    if choice == "4":
+        center_freq_hz = FloatPrompt.ask("Center frequency Hz", default=433_920_000.0, console=console)
+        return GuidedPreset("4", "Custom frequency", center_freq_hz)
+    return next(preset for preset in GUIDED_PRESETS if preset.key == choice)
+
+
+def _print_beginner_boundary(console: Console) -> None:
+    console.print(
+        Panel(
+            (
+                "Burstwatch is passive. Use it only with your own devices, your own lab, "
+                "public/broadcast signals you are allowed to receive, or written authorization.\n\n"
+                "The guided flow saves files first, then scans those files. It does not transmit."
+            ),
+            title="Before You Start",
+            box=box.ROUNDED,
+            border_style="yellow",
+            expand=True,
+        )
+    )
+
+
+def _print_tool_statuses(console: Console, statuses: list[ToolStatus]) -> None:
+    table = Table(box=box.SIMPLE_HEAVY, expand=True, header_style="bold bright_cyan")
+    table.add_column("Tool", style="bold white", overflow="fold")
+    table.add_column("Status", style="bold", no_wrap=True)
+    if console.size.width >= 86:
+        table.add_column("Purpose", style="bright_black", overflow="fold")
+    table.add_column("Command", style="cyan", overflow="fold")
+    for status in statuses:
+        row = [
+            status.label,
+            "[green]ready[/green]" if status.available else "[yellow]missing[/yellow]",
+        ]
+        if console.size.width >= 86:
+            row.append(status.purpose)
+        row.append(status.path or status.install_hint)
+        table.add_row(*row)
+    console.print(table)
+
+
+def _print_install_hints(console: Console, statuses: list[ToolStatus]) -> None:
+    commands = sorted({status.install_hint for status in statuses if not status.available})
+    if not commands:
+        console.print("[green]All known third-party tools are installed.[/green]")
+        return
+    for command in commands:
+        console.print(f"[yellow]Install:[/yellow] {command}")
+
+
+def _require_tool(console: Console, key: str) -> bool:
+    for status in tool_statuses():
+        if status.key == key and status.available:
+            return True
+        if status.key == key:
+            console.print(f"[yellow]{status.label} is not installed.[/yellow]")
+            console.print(f"[yellow]Install:[/yellow] {status.install_hint}")
+            return False
+    console.print(f"[yellow]Unknown tool:[/yellow] {key}")
+    return False
+
+
+def _launch_tool_from_menu(console: Console, key: str) -> None:
+    try:
+        process = launch_tool(key)
+    except FileNotFoundError as exc:
+        console.print(f"[yellow]Tool missing.[/yellow] {exc}")
+        return
+    console.print(f"[green]Launched process {process.pid}.[/green]")
+
+
+def _run_rtl_test(console: Console) -> None:
+    try:
+        result = run_tool_check("rtl_test", timeout_s=10.0)
+    except FileNotFoundError as exc:
+        console.print(f"[yellow]Tool missing.[/yellow] {exc}")
+        return
+    except Exception as exc:
+        console.print(f"[red]RTL-SDR test failed to run:[/red] {exc}")
+        return
+    output = "\n".join(part for part in (result.stdout.strip(), result.stderr.strip()) if part)
+    console.print(
+        Panel(
+            output or f"rtl_test exited with status {result.returncode}",
+            title=f"RTL-SDR Test: exit {result.returncode}",
+            box=box.ROUNDED,
+            border_style="green" if result.returncode == 0 else "yellow",
+            expand=True,
+        )
+    )
+
+
+def _print_dashboard_choices(console: Console, *, with_artifacts: bool) -> None:
+    table = Table(box=box.SIMPLE_HEAVY, expand=True, header_style="bold bright_cyan")
+    table.add_column("Key", style="bold yellow", width=4, no_wrap=True)
+    table.add_column("Next action", style="bold white")
+    if with_artifacts:
+        table.add_row("1", "Record and scan another capture")
+        table.add_row("2", "Build baseline or watch for changes")
+        table.add_row("3", "Use an existing capture")
+        table.add_row("4", "Return")
+    else:
+        table.add_row("1", "Start guided first capture")
+        table.add_row("2", "Check or launch third-party tools")
+        table.add_row("3", "Return")
+    console.print(table)
+
+
+def _print_next_steps(console: Console) -> None:
+    console.print(
+        Panel(
+            (
+                "Next: open Guided dashboard to review saved outputs.\n"
+                "After you have a few scans, use Baseline and watch to learn normal activity."
+            ),
+            title="Next Step",
+            box=box.ROUNDED,
+            border_style="bright_blue",
+            expand=True,
+        )
+    )
+
+
+def _recent_artifact_paths(artifact_type: str) -> list[Path]:
+    return [
+        artifact.path
+        for artifact in summarize_artifacts("runs", recursive=True, limit=100)
+        if artifact.artifact_type == artifact_type
+    ]
 
 
 def _prompt_analysis_values(console: Console) -> AnalysisPromptValues:
@@ -467,6 +806,12 @@ def _default_capture_path(center_freq_hz: float) -> Path:
 
 def _default_artifact_path(capture_path: Path, label: str, suffix: str = ".json") -> Path:
     return Path("runs") / f"{capture_path.stem}-{label}{suffix}"
+
+
+def _artifact_source_stem(path: Path) -> Path:
+    if path.is_dir():
+        return Path(path.name or "captures")
+    return path
 
 
 def _print_capture_summary(console: Console, summary: dict[str, object]) -> None:

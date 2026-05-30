@@ -12,6 +12,7 @@ from .models import AnalysisConfig
 from .pipeline import analyze_capture, summarize_events
 from .recording import RtlSdrCaptureRequest, record_rtl_sdr_capture
 from .store import write_jsonl, write_sqlite
+from .tools import ToolStatus, tool_statuses
 from .workflows import build_baseline, build_fingerprints, scan_inputs, watch_against_baseline
 
 
@@ -291,6 +292,14 @@ def build_parser() -> argparse.ArgumentParser:
     dashboard.add_argument("--json", action="store_true", help="Print artifact dashboard as JSON")
     dashboard.set_defaults(func=_dashboard_command)
 
+    tools = subparsers.add_parser(
+        "tools",
+        help="Show third-party receiver tool status.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    tools.add_argument("--json", action="store_true", help="Print tool status as JSON")
+    tools.set_defaults(func=_tools_command)
+
     menu = subparsers.add_parser(
         "menu",
         help="Launch the guided Rich menu interface.",
@@ -480,6 +489,15 @@ def _dashboard_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _tools_command(args: argparse.Namespace) -> int:
+    statuses = tool_statuses()
+    if args.json:
+        print(json.dumps([_tool_status_to_dict(status) for status in statuses], indent=2, sort_keys=True))
+        return 0
+    _print_tool_statuses(statuses)
+    return 0
+
+
 def _menu_command(args: argparse.Namespace) -> int:
     from .ui import run_menu
 
@@ -662,3 +680,21 @@ def _print_dashboard_summary(artifacts: list[ArtifactSummary]) -> None:
             f"{artifact.artifact_type} modified={artifact.modified_at} "
             f"metric=\"{artifact.metric}\" path={artifact.path}"
         )
+
+
+def _tool_status_to_dict(status: ToolStatus) -> dict[str, object]:
+    return {
+        "key": status.key,
+        "label": status.label,
+        "available": status.available,
+        "path": status.path,
+        "purpose": status.purpose,
+        "install_hint": status.install_hint,
+    }
+
+
+def _print_tool_statuses(statuses: list[ToolStatus]) -> None:
+    for status in statuses:
+        state = "ready" if status.available else "missing"
+        location = status.path or status.install_hint
+        print(f"{status.key}: {state} - {location}")
