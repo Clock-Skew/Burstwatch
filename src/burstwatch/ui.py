@@ -51,7 +51,7 @@ class AnalysisPromptValues:
 
 
 @dataclass(frozen=True)
-class GuidedPreset:
+class BandPreset:
     key: str
     label: str
     center_freq_hz: float
@@ -60,7 +60,31 @@ class GuidedPreset:
     freq_bin_hz: float = 25_000.0
 
 
-BEGINNER_CONFIG = AnalysisPromptValues(
+@dataclass(frozen=True)
+class SignalPath:
+    key: str
+    title: str
+    center_freq_hz: float
+    focus: str
+    examples: str
+    method: str
+    boundary: str
+    sample_rate_hz: float = 2_400_000.0
+    duration_s: float = 10.0
+    freq_bin_hz: float = 25_000.0
+
+    def to_preset(self) -> BandPreset:
+        return BandPreset(
+            self.key,
+            self.title,
+            self.center_freq_hz,
+            self.sample_rate_hz,
+            self.duration_s,
+            self.freq_bin_hz,
+        )
+
+
+DEFAULT_ANALYSIS_CONFIG = AnalysisPromptValues(
     smoothing_samples=256,
     threshold_sigma=6.0,
     min_burst_ms=1.0,
@@ -68,10 +92,76 @@ BEGINNER_CONFIG = AnalysisPromptValues(
     feature_window_count=8,
 )
 
-GUIDED_PRESETS = (
-    GuidedPreset("1", "433.92 MHz ISM sensors/remotes", 433_920_000.0),
-    GuidedPreset("2", "915 MHz US ISM sensors", 915_000_000.0),
-    GuidedPreset("3", "315 MHz low-power devices", 315_000_000.0),
+BAND_PRESETS = (
+    BandPreset("1", "433.92 MHz ISM sensors/remotes", 433_920_000.0),
+    BandPreset("2", "915 MHz US ISM sensors", 915_000_000.0),
+    BandPreset("3", "315 MHz low-power devices", 315_000_000.0),
+)
+
+SIGNAL_PATHS = (
+    SignalPath(
+        "1",
+        "433 MHz home/lab sensors",
+        433_920_000.0,
+        "Short OOK/ASK bursts and repeating IDs from owned sensors.",
+        "Weather stations, contact sensors, outlet remotes, soil sensors.",
+        "Burst timing, rough bandwidth, repeated center frequency, baseline changes.",
+        "Owned or authorized devices only; do not decode a neighbor's telemetry.",
+    ),
+    SignalPath(
+        "2",
+        "315 MHz low-power devices",
+        315_000_000.0,
+        "Short bursts from older low-power remotes and some vehicle-adjacent sensors.",
+        "Owned remotes, lab transmitters, your own vehicle TPMS presence checks.",
+        "Burst count, duty cycle, OOK/ASK shape, time gaps between transmissions.",
+        "Own equipment only; no key capture, replay, or third-party vehicle work.",
+    ),
+    SignalPath(
+        "3",
+        "902-928 MHz ISM activity",
+        915_000_000.0,
+        "FSK, chirp-like, and sensor telemetry activity in the US ISM band.",
+        "Owned LoRa-style modules, lab sensors, smart plugs, hobby telemetry.",
+        "Shape labels, channel occupancy, duty cycle, and new-emitter alerts.",
+        "Metadata-only unless the device and protocol are yours or authorized.",
+    ),
+    SignalPath(
+        "4",
+        "137 MHz NOAA satellite practice",
+        137_100_000.0,
+        "Public weather satellite passes for receiver and antenna practice.",
+        "NOAA APT passes recorded with Gqrx or GNU Radio.",
+        "Waterfall review, Doppler awareness, pass timing, wide FM signal presence.",
+        "Public broadcast reception; Burstwatch may only summarize energy bursts.",
+        sample_rate_hz=1_024_000.0,
+        duration_s=30.0,
+        freq_bin_hz=50_000.0,
+    ),
+    SignalPath(
+        "5",
+        "1090 MHz ADS-B trust study",
+        1_090_000_000.0,
+        "Public aircraft broadcast visibility and receiver calibration.",
+        "ADS-B/Mode S energy checks before using a purpose-built decoder.",
+        "Signal presence, burst density, impossible-movement ideas for later analytics.",
+        "Receive-only observation; no aviation interference or operational claims.",
+        sample_rate_hz=2_400_000.0,
+        duration_s=20.0,
+        freq_bin_hz=100_000.0,
+    ),
+    SignalPath(
+        "6",
+        "FM broadcast receiver check",
+        100_100_000.0,
+        "Quick confidence check that the SDR, antenna, and gain are working.",
+        "A known local FM station, viewed in Gqrx before deeper experiments.",
+        "Waterfall shape, gain tuning, sample-rate sanity, antenna placement.",
+        "Public broadcast calibration; not a security target.",
+        sample_rate_hz=2_400_000.0,
+        duration_s=8.0,
+        freq_bin_hz=100_000.0,
+    ),
 )
 
 
@@ -79,7 +169,7 @@ def run_menu() -> int:
     console = Console()
     actions = _menu_actions()
     while True:
-        console.clear()
+        _screen_break(console)
         console.print(render_menu_screen(console, actions))
         choice = Prompt.ask(
             "[bold cyan]Select action[/bold cyan]",
@@ -92,8 +182,8 @@ def run_menu() -> int:
             console.print("[bold green]Exiting Burstwatch menu.[/bold green]")
             return 0
 
-        console.clear()
-        console.print(render_header(console, subtitle=action.title))
+        _screen_break(console)
+        console.print(render_header(console, subtitle=action.title, compact=True))
         try:
             action.runner(console)
         except Exception as exc:  # pragma: no cover - defensive UI path
@@ -103,7 +193,7 @@ def run_menu() -> int:
 
 def render_menu_screen(console: Console, actions: list[MenuAction]):
     width = console.size.width
-    header = render_header(console, subtitle="Passive RF workflow menu")
+    header = render_header(console, subtitle="Burstwatch signal workspace")
     table = Table(
         box=box.SIMPLE_HEAVY if width >= 72 else box.SIMPLE,
         expand=True,
@@ -122,7 +212,7 @@ def render_menu_screen(console: Console, actions: list[MenuAction]):
             table.add_row(action.key, action.title)
 
     footer = Panel(
-        Text("New users: choose 1. The menu creates captures, scans, and dashboard files for you.", style="bright_black"),
+        Text("Pick a path. Burstwatch records, scans, saves, and brings the results back here.", style="bright_black"),
         box=box.ROUNDED,
         border_style="blue",
         expand=True,
@@ -131,9 +221,9 @@ def render_menu_screen(console: Console, actions: list[MenuAction]):
     return Group(header, table, footer)
 
 
-def render_header(console: Console, *, subtitle: str):
+def render_header(console: Console, *, subtitle: str, compact: bool = False):
     width = console.size.width
-    if width >= 70:
+    if width >= 70 and not compact:
         banner = _render_banner()
     else:
         title = Text("Burstwatch", style="bold bright_cyan")
@@ -190,55 +280,60 @@ def _render_banner() -> Panel:
 
 def _menu_actions() -> list[MenuAction]:
     return [
-        MenuAction("1", "Start here", "Guided first run with defaults, automatic scan output, and next steps.", _run_start_here_menu),
-        MenuAction("2", "Guided dashboard", "Show current project state and the next useful action.", _run_dashboard_menu),
-        MenuAction("3", "Tools and receivers", "Check, test, or launch rtl_sdr, Gqrx, and GNU Radio.", _run_tools_menu),
-        MenuAction("4", "Record and scan", "Record from RTL-SDR, save files, scan, and return to dashboard.", _run_capture_menu),
-        MenuAction("5", "Use saved capture", "Analyze or scan an existing IQ/WAV file with guided defaults.", _run_existing_capture_menu),
-        MenuAction("6", "Baseline and watch", "Build a baseline or compare fresh captures against one.", _run_baseline_watch_menu),
-        MenuAction("7", "Advanced workflows", "Manual analyze, scan, fingerprint, baseline, and watch commands.", _run_advanced_menu),
-        MenuAction("8", "Show help", "Plain-language explanation of the workflow and tools.", _run_help_menu),
+        MenuAction("1", "Start a session", "Choose a practical RF path and let Burstwatch handle the files.", _run_start_here_menu),
+        MenuAction("2", "Signal board", "Review saved results and choose the next move.", _run_dashboard_menu),
+        MenuAction("3", "Signal ideas", "Explore passive paths, bands, examples, and detection methods.", _run_signal_paths_menu),
+        MenuAction("4", "Receiver tools", "Check, test, or launch rtl_sdr, Gqrx, and GNU Radio.", _run_tools_menu),
+        MenuAction("5", "Record from SDR", "Capture from RTL-SDR, save files, scan, and return to results.", _run_capture_menu),
+        MenuAction("6", "Open a capture", "Scan an existing IQ/WAV file or folder with sensible defaults.", _run_existing_capture_menu),
+        MenuAction("7", "Baseline and watch", "Learn a local RF baseline and flag changes later.", _run_baseline_watch_menu),
+        MenuAction("8", "Advanced tools", "Manual analyze, scan, fingerprint, baseline, and watch commands.", _run_advanced_menu),
         MenuAction("9", "Quit", "Exit the interactive menu.", lambda console: None),
     ]
 
 
 def _run_start_here_menu(console: Console) -> None:
-    _print_beginner_boundary(console)
+    _print_session_boundary(console)
     _print_tool_statuses(console, tool_statuses())
+    _print_session_examples(console)
     table = Table(box=box.SIMPLE_HEAVY, expand=True, header_style="bold bright_cyan")
     table.add_column("Key", style="bold yellow", width=4, no_wrap=True)
     table.add_column("Path", style="bold white")
-    table.add_column("Use when", style="bright_black")
-    table.add_row("1", "Record with RTL-SDR", "The USB SDR is plugged in and you want a fresh capture.")
-    table.add_row("2", "Use an existing capture", "You already have a .c64 or .wav file/folder.")
-    table.add_row("3", "Open Gqrx", "You want to visually explore the spectrum first.")
-    table.add_row("4", "Open GNU Radio", "You want to build or edit a capture flowgraph.")
+    table.add_column("Best fit", style="bright_black")
+    table.add_row("1", "Pick from signal ideas", "Choose a band by device type or experiment goal.")
+    table.add_row("2", "Record a common band", "The USB SDR is plugged in and you want a fresh capture.")
+    table.add_row("3", "Open an existing capture", "You already have a .c64 or .wav file/folder.")
+    table.add_row("4", "Open receiver tools", "Use Gqrx, GNU Radio, or rtl_test from here.")
     table.add_row("5", "Return", "Go back to the main menu.")
     console.print(table)
     choice = Prompt.ask(
-        "What do you want to do?",
+        "Choose a path",
         choices=["1", "2", "3", "4", "5"],
         default="1",
         console=console,
     )
     if choice == "1":
-        _run_capture_menu(console)
+        _run_signal_paths_menu(console)
     elif choice == "2":
-        _run_existing_capture_menu(console)
+        _run_capture_menu(console)
     elif choice == "3":
-        _launch_tool_from_menu(console, "gqrx")
+        _run_existing_capture_menu(console)
     elif choice == "4":
-        _launch_tool_from_menu(console, "gnuradio")
+        _run_tools_menu(console)
     else:
         return
 
 
-def _run_capture_menu(console: Console) -> None:
+def _run_capture_menu(console: Console, preset: BandPreset | None = None) -> None:
     if not _require_tool(console, "rtl_sdr"):
         return
     if Confirm.ask("Run USB SDR hardware test first?", default=True, console=console):
         _run_rtl_test(console)
-    preset = _ask_guided_preset(console)
+    if preset is None:
+        _print_recording_examples(console)
+        preset = _ask_band_preset(console)
+    else:
+        _print_selected_path(console, preset)
     center_freq_hz = preset.center_freq_hz
     sample_rate_hz = FloatPrompt.ask("Sample rate Hz", default=preset.sample_rate_hz, console=console)
     duration_s = FloatPrompt.ask("Duration seconds", default=preset.duration_s, console=console)
@@ -280,6 +375,7 @@ def _run_capture_menu(console: Console) -> None:
 
 
 def _run_existing_capture_menu(console: Console) -> None:
+    _print_capture_import_examples(console)
     capture_path = Path(_ask_required(console, "Capture file or folder"))
     sample_format = Prompt.ask(
         "Input format",
@@ -299,7 +395,7 @@ def _run_existing_capture_menu(console: Console) -> None:
         center_freq_hz=center_freq_hz,
         sample_format=sample_format,
         config_factory=lambda actual_sample_rate_hz: _analysis_config_from_prompt_values(
-            BEGINNER_CONFIG,
+            DEFAULT_ANALYSIS_CONFIG,
             actual_sample_rate_hz,
         ),
         recursive=recursive,
@@ -310,9 +406,56 @@ def _run_existing_capture_menu(console: Console) -> None:
     event_path = _default_artifact_path(_artifact_source_stem(capture_path), "events", ".jsonl")
     write_json_document(summary.to_dict(), scan_path)
     write_jsonl(events, event_path)
-    console.print(f"[green]Saved dashboard JSON:[/green] {scan_path}")
+    console.print(f"[green]Saved result JSON:[/green] {scan_path}")
     console.print(f"[green]Saved burst events:[/green] {event_path}")
     _print_next_steps(console)
+
+
+def _run_signal_paths_menu(console: Console) -> None:
+    console.print(
+        Panel(
+            (
+                "These are starting points for receive-only RF work. "
+                "Pick one to see examples, detection ideas, and a matching capture setup."
+            ),
+            title="Signal Ideas",
+            box=box.ROUNDED,
+            border_style="bright_blue",
+            expand=True,
+        )
+    )
+    table = Table(box=box.SIMPLE_HEAVY, expand=True, header_style="bold bright_cyan")
+    table.add_column("Key", style="bold yellow", width=4, no_wrap=True)
+    table.add_column("Path", style="bold white", overflow="fold")
+    table.add_column("Center", justify="right", style="cyan", no_wrap=True)
+    if console.size.width >= 92:
+        table.add_column("Look for", style="bright_black", overflow="fold")
+    for path in SIGNAL_PATHS:
+        row = [path.key, path.title, f"{path.center_freq_hz / 1_000_000:.3f} MHz"]
+        if console.size.width >= 92:
+            row.append(path.focus)
+        table.add_row(*row)
+    return_row = ["7", "Return", "-"]
+    if console.size.width >= 92:
+        return_row.append("Back to the main menu.")
+    table.add_row(*return_row)
+    console.print(table)
+    choice = Prompt.ask("Choose signal idea", choices=[path.key for path in SIGNAL_PATHS] + ["7"], default="1", console=console)
+    if choice == "7":
+        return
+
+    signal_path = next(path for path in SIGNAL_PATHS if path.key == choice)
+    _print_signal_path_detail(console, signal_path)
+    action = Prompt.ask(
+        "Next",
+        choices=["1", "2", "3"],
+        default="1",
+        console=console,
+    )
+    if action == "1":
+        _run_capture_menu(console, preset=signal_path.to_preset())
+    elif action == "2":
+        _launch_tool_from_menu(console, "gqrx")
 
 
 def _run_baseline_watch_menu(console: Console) -> None:
@@ -320,7 +463,7 @@ def _run_baseline_watch_menu(console: Console) -> None:
     table.add_column("Key", style="bold yellow", width=4, no_wrap=True)
     table.add_column("Workflow", style="bold white")
     table.add_column("Meaning", style="bright_black")
-    table.add_row("1", "Build baseline", "Learn what normal looks like from saved scan JSON.")
+    table.add_row("1", "Build baseline", "Learn a local pattern from saved scan JSON.")
     table.add_row("2", "Watch against baseline", "Compare a new capture set against a saved baseline.")
     table.add_row("3", "Return", "Go back.")
     console.print(table)
@@ -333,7 +476,7 @@ def _run_baseline_watch_menu(console: Console) -> None:
     if choice == "1":
         scan_paths = _recent_artifact_paths("scan")
         if not scan_paths:
-            console.print("[yellow]No scan JSON found yet. Run Start here or Use saved capture first.[/yellow]")
+            console.print("[yellow]No scan JSON found yet. Start a session or open a capture first.[/yellow]")
             return
         baseline_path = Path("runs") / "baseline.json"
         summary = build_baseline(scan_paths)
@@ -446,7 +589,7 @@ def _run_dashboard_menu(console: Console) -> None:
     artifacts = summarize_artifacts(root, recursive=True, limit=12)
     console.print(
         Panel(
-            "This dashboard reads saved Burstwatch outputs. It does not scan by itself.",
+            "This board reads saved Burstwatch results from runs/. To add data, record from the SDR or open an existing capture.",
             box=box.ROUNDED,
             border_style="bright_blue",
             expand=True,
@@ -477,12 +620,12 @@ def _run_help_menu(console: Console) -> None:
     console.print(
         Panel(
             (
-                "Normal path:\n"
-                "1. Start here\n"
-                "2. Record with RTL-SDR or choose an existing capture\n"
-                "3. Burstwatch saves scan JSON in runs/\n"
-                "4. Dashboard shows what was found and what to do next\n\n"
-                "Use Tools and receivers to open Gqrx, GNU Radio Companion, or rtl_test."
+                "Suggested path:\n"
+                "1. Start a session\n"
+                "2. Pick a signal idea, record from RTL-SDR, or open an existing capture\n"
+                "3. Burstwatch saves scan JSON and event logs in runs/\n"
+                "4. Signal board shows the saved result and the next useful move\n\n"
+                "Use Receiver tools to open Gqrx, GNU Radio Companion, or rtl_test."
             ),
             title="How Burstwatch Works",
             box=box.ROUNDED,
@@ -550,14 +693,14 @@ def _scan_saved_capture_with_defaults(
     center_freq_hz: float | None,
     freq_bin_hz: float,
 ) -> None:
-    with console.status("Scanning saved capture and writing dashboard files...", spinner="dots"):
+    with console.status("Scanning saved capture and writing result files...", spinner="dots"):
         summary, events = scan_inputs(
             [capture_path],
             sample_rate_hz=sample_rate_hz,
             center_freq_hz=center_freq_hz,
             sample_format="complex64",
             config_factory=lambda actual_sample_rate_hz: _analysis_config_from_prompt_values(
-                BEGINNER_CONFIG,
+                DEFAULT_ANALYSIS_CONFIG,
                 actual_sample_rate_hz,
             ),
             freq_bin_hz=freq_bin_hz,
@@ -567,40 +710,129 @@ def _scan_saved_capture_with_defaults(
     event_path = _default_artifact_path(capture_path, "events", ".jsonl")
     write_json_document(summary.to_dict(), scan_path)
     write_jsonl(events, event_path)
-    console.print(f"[green]Saved dashboard JSON:[/green] {scan_path}")
+    console.print(f"[green]Saved result JSON:[/green] {scan_path}")
     console.print(f"[green]Saved burst events:[/green] {event_path}")
 
 
-def _ask_guided_preset(console: Console) -> GuidedPreset:
+def _ask_band_preset(console: Console) -> BandPreset:
     table = Table(box=box.SIMPLE_HEAVY, expand=True, header_style="bold bright_cyan")
     table.add_column("Key", style="bold yellow", width=4, no_wrap=True)
     table.add_column("Band", style="bold white")
     table.add_column("Center", justify="right", style="cyan")
-    for preset in GUIDED_PRESETS:
+    for preset in BAND_PRESETS:
         table.add_row(preset.key, preset.label, f"{preset.center_freq_hz / 1_000_000:.3f} MHz")
     table.add_row("4", "Custom frequency", "manual")
     console.print(table)
     choice = Prompt.ask("Choose band", choices=["1", "2", "3", "4"], default="1", console=console)
     if choice == "4":
         center_freq_hz = FloatPrompt.ask("Center frequency Hz", default=433_920_000.0, console=console)
-        return GuidedPreset("4", "Custom frequency", center_freq_hz)
-    return next(preset for preset in GUIDED_PRESETS if preset.key == choice)
+        return BandPreset("4", "Custom frequency", center_freq_hz)
+    return next(preset for preset in BAND_PRESETS if preset.key == choice)
 
 
-def _print_beginner_boundary(console: Console) -> None:
+def _print_session_boundary(console: Console) -> None:
     console.print(
         Panel(
             (
                 "Burstwatch is passive. Use it only with your own devices, your own lab, "
                 "public/broadcast signals you are allowed to receive, or written authorization.\n\n"
-                "The guided flow saves files first, then scans those files. It does not transmit."
+                "The workflow saves files first, then scans those files. It does not transmit."
             ),
-            title="Before You Start",
+            title="Operating Boundary",
             box=box.ROUNDED,
             border_style="yellow",
             expand=True,
         )
     )
+
+
+def _print_session_examples(console: Console) -> None:
+    table = Table(box=box.SIMPLE, expand=True, header_style="bold bright_cyan")
+    table.add_column("Good first session", style="bold white", overflow="fold")
+    table.add_column("What it teaches", style="bright_black", overflow="fold")
+    table.add_row("433.92 MHz owned sensor", "Short OOK/ASK bursts, repeated IDs, baseline changes.")
+    table.add_row("FM broadcast check", "Receiver/gain sanity before deeper RF work.")
+    table.add_row("Existing GNU Radio capture", "File handoff without remembering CLI flags.")
+    console.print(table)
+
+
+def _print_recording_examples(console: Console) -> None:
+    console.print(
+        Panel(
+            (
+                "Examples:\n"
+                "- 433.920 MHz, 10 seconds: owned ISM sensors/remotes\n"
+                "- 915.000 MHz, 10 seconds: owned US ISM telemetry experiments\n"
+                "- 315.000 MHz, 10 seconds: owned low-power devices or your own TPMS presence checks\n\n"
+                "If you are unsure, start with 433.920 MHz and keep the default sample rate."
+            ),
+            title="Capture Examples",
+            box=box.ROUNDED,
+            border_style="bright_blue",
+            expand=True,
+        )
+    )
+
+
+def _print_capture_import_examples(console: Console) -> None:
+    console.print(
+        Panel(
+            (
+                "Examples:\n"
+                "- captures/433920000-lab.c64 from Burstwatch\n"
+                "- captures/ism-433/ as a folder of related captures\n"
+                "- a GNU Radio complex64 File Sink output\n"
+                "- a WAV recording exported from a receiver tool\n\n"
+                "For complex64, provide the sample rate. For WAV, Burstwatch reads the sample rate from the file."
+            ),
+            title="Open A Capture",
+            box=box.ROUNDED,
+            border_style="bright_blue",
+            expand=True,
+        )
+    )
+
+
+def _print_selected_path(console: Console, preset: BandPreset) -> None:
+    console.print(
+        Panel(
+            (
+                f"Path: {preset.label}\n"
+                f"Center: {preset.center_freq_hz / 1_000_000:.3f} MHz\n"
+                f"Default sample rate: {preset.sample_rate_hz:.0f} Hz\n"
+                f"Default duration: {preset.duration_s:.0f} seconds"
+            ),
+            title="Selected Signal Path",
+            box=box.ROUNDED,
+            border_style="bright_blue",
+            expand=True,
+        )
+    )
+
+
+def _print_signal_path_detail(console: Console, signal_path: SignalPath) -> None:
+    console.print(
+        Panel(
+            (
+                f"Center: {signal_path.center_freq_hz / 1_000_000:.3f} MHz\n"
+                f"Examples: {signal_path.examples}\n"
+                f"Look for: {signal_path.focus}\n"
+                f"Detection method: {signal_path.method}\n"
+                f"Boundary: {signal_path.boundary}"
+            ),
+            title=signal_path.title,
+            box=box.ROUNDED,
+            border_style="bright_blue",
+            expand=True,
+        )
+    )
+    table = Table(box=box.SIMPLE, expand=True, header_style="bold bright_cyan")
+    table.add_column("Key", style="bold yellow", width=4, no_wrap=True)
+    table.add_column("Next move", style="bold white")
+    table.add_row("1", "Record this center frequency with RTL-SDR")
+    table.add_row("2", "Open Gqrx to view it first")
+    table.add_row("3", "Return")
+    console.print(table)
 
 
 def _print_tool_statuses(console: Console, statuses: list[ToolStatus]) -> None:
@@ -680,10 +912,10 @@ def _print_dashboard_choices(console: Console, *, with_artifacts: bool) -> None:
     if with_artifacts:
         table.add_row("1", "Record and scan another capture")
         table.add_row("2", "Build baseline or watch for changes")
-        table.add_row("3", "Use an existing capture")
+        table.add_row("3", "Open an existing capture")
         table.add_row("4", "Return")
     else:
-        table.add_row("1", "Start guided first capture")
+        table.add_row("1", "Start a signal session")
         table.add_row("2", "Check or launch third-party tools")
         table.add_row("3", "Return")
     console.print(table)
@@ -693,8 +925,8 @@ def _print_next_steps(console: Console) -> None:
     console.print(
         Panel(
             (
-                "Next: open Guided dashboard to review saved outputs.\n"
-                "After you have a few scans, use Baseline and watch to learn normal activity."
+                "Next: open Signal board to review saved outputs.\n"
+                "After you have a few scans, use Baseline and watch to learn your local RF pattern."
             ),
             title="Next Step",
             box=box.ROUNDED,
@@ -797,6 +1029,11 @@ def _ask_path_default(console: Console, label: str, default: Path) -> Path:
 
 def _pause(console: Console) -> None:
     console.input("[bright_black]Press Enter to continue[/bright_black]")
+
+
+def _screen_break(console: Console) -> None:
+    console.print()
+    console.rule("[bright_black]Burstwatch[/bright_black]")
 
 
 def _default_capture_path(center_freq_hz: float) -> Path:
@@ -960,7 +1197,8 @@ def _print_dashboard_summary(console: Console, artifacts: list[ArtifactSummary])
     if not artifacts:
         console.print(
             Panel(
-                "No JSON yet.",
+                "No saved results yet.\nRecord from the SDR or open a capture, and Burstwatch will write result files into runs/.",
+                title="Signal Board",
                 box=box.ROUNDED,
                 border_style="yellow",
                 expand=True,

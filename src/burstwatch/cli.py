@@ -289,7 +289,7 @@ def build_parser() -> argparse.ArgumentParser:
     dashboard.add_argument("root", nargs="?", type=Path, default=Path("runs"), help="Directory containing saved JSON outputs")
     dashboard.add_argument("--no-recursive", action="store_true", help="Only inspect the top-level directory")
     dashboard.add_argument("--limit", type=int, default=12, help="Maximum artifacts to show")
-    dashboard.add_argument("--json", action="store_true", help="Print artifact dashboard as JSON")
+    dashboard.add_argument("--json", action="store_true", help="Print artifact summary as JSON")
     dashboard.set_defaults(func=_dashboard_command)
 
     tools = subparsers.add_parser(
@@ -302,7 +302,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     menu = subparsers.add_parser(
         "menu",
-        help="Launch the guided Rich menu interface.",
+        help="Launch the Burstwatch terminal workspace.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     menu.set_defaults(func=_menu_command)

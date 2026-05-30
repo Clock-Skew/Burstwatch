@@ -10,4 +10,5 @@ dist/
 *.sqlite3
 *.db
 *.jsonl
-
+captures/
+runs/

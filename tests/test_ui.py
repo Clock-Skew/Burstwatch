@@ -30,5 +30,5 @@ class UiTests(unittest.TestCase):
         screen = render_menu_screen(console, actions)
         console.print(screen)
         output = console.export_text()
-        self.assertIn("Passive RF workflow menu", output)
-        self.assertIn("New users: choose 1", output)
+        self.assertIn("Burstwatch signal workspace", output)
+        self.assertIn("Pick a path", output)
