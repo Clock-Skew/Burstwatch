@@ -55,6 +55,7 @@ burstwatch scan <capture-or-dir> [more inputs...]
 burstwatch fingerprint <capture-or-dir> [more inputs...]
 burstwatch baseline <scan.json> [more scan json files...]
 burstwatch watch <baseline.json> <capture-or-dir> [more inputs...]
+burstwatch menu
 ```
 
 ## Quick start
@@ -104,6 +105,19 @@ burstwatch watch runs/433-baseline.json captures/new/ \
   --recursive \
   --json-out runs/433-watch.json
 ```
+
+Launch the responsive Rich menu:
+
+```bash
+burstwatch menu
+```
+
+The menu adds:
+
+- a multicolor ASCII header on wide terminals
+- a compact fallback header on narrow terminals
+- guided prompts for all five workflows
+- Rich tables and panels for result summaries
 
 ## Advanced workflows
 
@@ -240,7 +254,7 @@ The intended live workflow is:
 2. Run `burstwatch analyze` or `burstwatch scan` on that capture.
 3. Use `fingerprint`, `baseline`, and `watch` to build durable passive discovery workflows.
 
-This keeps the first pass testable and auditable before any future live-capture or TUI/menu work.
+This keeps the command layer testable and auditable before any future live-capture work.
 
 ## Output shape
 
@@ -289,4 +303,4 @@ PYTHONPATH=src python3 -m burstwatch --help
 
 ## Next step
 
-The next logical pass is the CLI menu layer you asked for, built on top of these five commands rather than replacing them.
+The next logical pass is deeper menu polish or a live-capture helper that feeds these same workflows without replacing them.

@@ -248,6 +248,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     watch.set_defaults(func=_watch_command)
 
+    menu = subparsers.add_parser(
+        "menu",
+        help="Launch the guided Rich menu interface.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    menu.set_defaults(func=_menu_command)
+
     return parser
 
 
@@ -374,6 +381,12 @@ def _watch_command(args: argparse.Namespace) -> int:
         return 0
     _print_watch_summary(summary.to_dict())
     return 0
+
+
+def _menu_command(args: argparse.Namespace) -> int:
+    from .ui import run_menu
+
+    return int(run_menu())
 
 
 def _add_capture_inputs(parser: argparse.ArgumentParser, *, allow_multiple: bool) -> None:
