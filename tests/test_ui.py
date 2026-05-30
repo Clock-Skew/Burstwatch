@@ -13,6 +13,8 @@ class UiTests(unittest.TestCase):
         parser = build_parser()
         help_text = parser.format_help()
         self.assertIn("menu", help_text)
+        self.assertIn("capture", help_text)
+        self.assertIn("dashboard", help_text)
 
     def test_render_header_wide_console(self) -> None:
         console = Console(width=100, record=True)

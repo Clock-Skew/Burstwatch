@@ -21,12 +21,17 @@
 - CLI can analyze a capture file
 - Synthetic tests cover the main label families
 - JSONL and SQLite output paths are wired
+- Passive RTL-SDR capture records unsigned 8-bit IQ to file, converts to `complex64`, then hands off to analysis or scan workflows
+- Rich menu includes capture, workflow execution, and a recent-artifact dashboard
+- GitHub README and MIT license are ready for publication
 
 ## VERIFY
 
 - `python -m unittest`
 - `python -m burstwatch --help`
 - `burstwatch analyze <capture> --sample-rate ...`
+- `burstwatch capture <capture.c64> --center-freq ...`
+- `burstwatch dashboard runs`
 
 ## CONSTRAINTS
 
@@ -34,4 +39,3 @@
 - No private comms interception
 - No cellular, vehicle, or third-party device targeting
 - Keep dependencies small and the code easy to audit
-

@@ -7,8 +7,10 @@ from typing import Sequence
 
 from .artifacts import write_json_document
 from .capture import load_capture
+from .dashboard import ArtifactSummary, summarize_artifacts
 from .models import AnalysisConfig
 from .pipeline import analyze_capture, summarize_events
+from .recording import RtlSdrCaptureRequest, record_rtl_sdr_capture
 from .store import write_jsonl, write_sqlite
 from .workflows import build_baseline, build_fingerprints, scan_inputs, watch_against_baseline
 
@@ -93,6 +95,36 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the full event summary as JSON",
     )
     analyze.set_defaults(func=_analyze_command)
+
+    capture = subparsers.add_parser(
+        "capture",
+        help="Record passive RTL-SDR IQ to complex64 before analysis.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    capture.add_argument("output", type=Path, help="Output complex64 capture path")
+    capture.add_argument("--center-freq", type=float, required=True, help="Tuned center frequency in Hz")
+    capture.add_argument("--sample-rate", type=float, default=2_400_000.0, help="Sample rate in Hz")
+    capture.add_argument("--duration", type=float, default=5.0, help="Capture duration in seconds")
+    capture.add_argument("--gain", default="auto", help="RTL-SDR gain value, or auto")
+    capture.add_argument("--device", type=int, default=0, help="RTL-SDR device index")
+    capture.add_argument("--ppm", type=int, default=None, help="Optional oscillator correction in PPM")
+    capture.add_argument("--rtl-sdr", default="rtl_sdr", help="rtl_sdr executable path")
+    capture.add_argument("--keep-raw", type=Path, default=None, help="Optional path for raw unsigned 8-bit IQ")
+    capture.add_argument(
+        "--metadata-json",
+        type=Path,
+        default=None,
+        help="Write capture metadata JSON",
+    )
+    capture.add_argument(
+        "--then",
+        choices=("none", "analyze", "scan"),
+        default="none",
+        help="Run a passive analysis step after recording",
+    )
+    capture.add_argument("--json", action="store_true", help="Print capture metadata as JSON")
+    _add_detection_options(capture)
+    capture.set_defaults(func=_capture_command)
 
     scan = subparsers.add_parser(
         "scan",
@@ -248,6 +280,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     watch.set_defaults(func=_watch_command)
 
+    dashboard = subparsers.add_parser(
+        "dashboard",
+        help="Show recent burstwatch JSON artifacts.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    dashboard.add_argument("root", nargs="?", type=Path, default=Path("runs"), help="Artifact root path")
+    dashboard.add_argument("--no-recursive", action="store_true", help="Only inspect the top-level directory")
+    dashboard.add_argument("--limit", type=int, default=12, help="Maximum artifacts to show")
+    dashboard.add_argument("--json", action="store_true", help="Print artifact dashboard as JSON")
+    dashboard.set_defaults(func=_dashboard_command)
+
     menu = subparsers.add_parser(
         "menu",
         help="Launch the guided Rich menu interface.",
@@ -330,6 +373,51 @@ def _scan_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _capture_command(args: argparse.Namespace) -> int:
+    request = RtlSdrCaptureRequest(
+        output_path=args.output,
+        center_freq_hz=args.center_freq,
+        sample_rate_hz=args.sample_rate,
+        duration_s=args.duration,
+        gain=args.gain,
+        device_index=args.device,
+        ppm=args.ppm,
+        rtl_sdr_path=args.rtl_sdr,
+        keep_raw_path=args.keep_raw,
+    )
+    result = record_rtl_sdr_capture(request)
+    metadata = result.to_dict()
+    if args.metadata_json is not None:
+        write_json_document(metadata, args.metadata_json)
+
+    if args.then == "analyze":
+        capture = load_capture(
+            result.output_path,
+            sample_rate_hz=result.sample_rate_hz,
+            center_freq_hz=result.center_freq_hz,
+            sample_format="complex64",
+        )
+        events = analyze_capture(capture, _config_from_args(args, capture.sample_rate_hz))
+        _print_summary(summarize_events(capture, events))
+    elif args.then == "scan":
+        summary, _events = scan_inputs(
+            [result.output_path],
+            sample_rate_hz=result.sample_rate_hz,
+            center_freq_hz=result.center_freq_hz,
+            sample_format="complex64",
+            config_factory=lambda sample_rate_hz: _config_from_args(args, sample_rate_hz),
+        )
+        _print_scan_summary(summary.to_dict())
+    elif args.json:
+        print(json.dumps(metadata, indent=2, sort_keys=True))
+    else:
+        print(
+            f"capture={result.output_path} samples={result.sample_count} "
+            f"sample_rate_hz={result.sample_rate_hz} center_freq_hz={result.center_freq_hz}"
+        )
+    return 0
+
+
 def _fingerprint_command(args: argparse.Namespace) -> int:
     scan_summary, _events = scan_inputs(
         [str(path) for path in args.inputs],
@@ -383,6 +471,15 @@ def _watch_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _dashboard_command(args: argparse.Namespace) -> int:
+    artifacts = summarize_artifacts(args.root, recursive=not args.no_recursive, limit=args.limit)
+    if args.json:
+        print(json.dumps([artifact.to_dict() for artifact in artifacts], indent=2, sort_keys=True))
+        return 0
+    _print_dashboard_summary(artifacts)
+    return 0
+
+
 def _menu_command(args: argparse.Namespace) -> int:
     from .ui import run_menu
 
@@ -417,6 +514,39 @@ def _add_analysis_options(parser: argparse.ArgumentParser) -> None:
         default="auto",
         help="Input sample format",
     )
+    parser.add_argument(
+        "--smoothing-samples",
+        type=int,
+        default=256,
+        help="Moving-average window for burst detection",
+    )
+    parser.add_argument(
+        "--threshold-sigma",
+        type=float,
+        default=6.0,
+        help="Envelope threshold in scaled MAD units",
+    )
+    parser.add_argument(
+        "--min-burst-ms",
+        type=float,
+        default=1.0,
+        help="Minimum burst length in milliseconds",
+    )
+    parser.add_argument(
+        "--merge-gap-ms",
+        type=float,
+        default=0.5,
+        help="Merge gaps shorter than this many milliseconds",
+    )
+    parser.add_argument(
+        "--feature-window-count",
+        type=int,
+        default=8,
+        help="Number of windows used for chirp tracking",
+    )
+
+
+def _add_detection_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--smoothing-samples",
         type=int,
@@ -520,4 +650,15 @@ def _print_watch_summary(summary: dict[str, object]) -> None:
         print(
             f"{alert['candidate_id']} status={alert['status']} freq={freq_text} "
             f"label={alert['dominant_label']} msg={alert['message']}"
+        )
+
+
+def _print_dashboard_summary(artifacts: list[ArtifactSummary]) -> None:
+    if not artifacts:
+        print("no burstwatch JSON artifacts found")
+        return
+    for artifact in artifacts:
+        print(
+            f"{artifact.artifact_type} modified={artifact.modified_at} "
+            f"metric=\"{artifact.metric}\" path={artifact.path}"
         )

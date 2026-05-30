@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Passive RF burst detector and shape classifier for owned or authorized captures."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "GPL-3.0-or-later" }
+license = { text = "MIT" }
 authors = [{ name = "Clock-Skew" }]
 keywords = [
   "rf",
@@ -24,6 +24,20 @@ dependencies = [
   "numpy>=1.24",
   "rich>=14.0.0",
 ]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Topic :: Security",
+  "Topic :: Scientific/Engineering :: Information Analysis",
+]
+
+[project.urls]
+Homepage = "https://github.com/Clock-Skew/burstwatch"
+Issues = "https://github.com/Clock-Skew/burstwatch/issues"
 
 [project.scripts]
 burstwatch = "burstwatch.cli:main"

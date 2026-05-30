@@ -1,44 +1,36 @@
 # burstwatch
 
-Passive RF burst analysis and device-discovery workflow tooling for owned or authorized captures.
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![GNU Radio](https://img.shields.io/badge/GNU%20Radio-capture%20friendly-FF6600)](https://www.gnuradio.org/)
+[![RTL-SDR](https://img.shields.io/badge/RTL--SDR-passive%20IQ-00599C)](https://osmocom.org/projects/rtl-sdr/wiki/Rtl-sdr)
+[![Rich](https://img.shields.io/badge/Rich-terminal%20UI-CC3366)](https://github.com/Textualize/rich)
+[![NumPy](https://img.shields.io/badge/NumPy-signal%20arrays-013243?logo=numpy&logoColor=white)](https://numpy.org/)
+[![License MIT](https://img.shields.io/badge/License-MIT-2EA44F.svg)](https://opensource.org/license/mit)
 
-`burstwatch` is file-first on purpose. It does not control the SDR, it does not transmit, and it does not try to decode private traffic. Its job is to turn saved IQ or WAV captures into passive RF metadata you can review, baseline, diff, and feed into later dashboards.
+`burstwatch` is a passive RF burst analysis toolkit for saved SDR captures. It helps you record or import IQ files, find burst activity, classify rough signal shapes, cluster likely emitters, build fingerprints, learn a baseline, and compare later captures for new or changed RF activity.
 
-## Recommended model
+It is designed for owned hardware, lab devices, and authorized research. It does not transmit. It does not decode private traffic. It does not make third-party systems yours to inspect.
 
-- Use `standard` for implementation work.
-- Use `deep` for classifier tuning or RF edge-case analysis.
-- Use `quick` for small follow-up edits and smoke checks.
+## Legal Boundary
 
-## What it does
+Use `burstwatch` only with your own equipment, your own lab captures, public/broadcast signals you are legally allowed to receive, or systems where you have explicit written authorization. Radio monitoring rules vary by country and service. Do not use this project to intercept private communications, target vehicles, target public-safety systems, collect cellular subscriber data, or profile third-party devices in the wild.
 
-- `analyze`: classify burst shapes inside one capture
+The project intentionally works from saved captures and passive metadata: frequency, burst timing, approximate bandwidth, rough signal shape, repetition patterns, and changes against a baseline.
+
+## Features
+
+- `capture`: record passive RTL-SDR IQ to `complex64`, then optionally analyze or scan it
+- `analyze`: classify bursts in one IQ or WAV capture
 - `scan`: cluster bursts into passive emitter candidates
-- `fingerprint`: derive reusable passive fingerprints from scan candidates
+- `fingerprint`: derive reusable passive RF fingerprints
 - `baseline`: learn normal emitter profiles from prior scans
 - `watch`: compare a fresh scan against a saved baseline
-
-Supported inputs:
-
-- raw `complex64` IQ captures
-- WAV captures
-- individual files
-- directories of captures
-
-Output targets:
-
-- terminal summaries
-- JSON documents
-- JSONL event streams
-- SQLite event databases
-
-## Safety boundary
-
-Use this only with your own hardware, your own lab captures, or systems you are explicitly authorized to observe. Keep this passive. Do not use it to target third-party devices, private communications, or restricted radio services.
+- `dashboard`: summarize recent `burstwatch` JSON artifacts
+- `menu`: launch the responsive Rich terminal menu with a multicolor ASCII banner
 
 ## Install
 
-Kali treats the system Python as externally managed, so use a virtualenv:
+Kali and other modern Linux distributions may mark the system Python as externally managed, so use a virtual environment:
 
 ```bash
 cd /home/smith/codex/software/local/burstwatch
@@ -47,26 +39,52 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-## Command overview
+Optional SDR-side tools:
 
 ```bash
-burstwatch analyze <capture>
-burstwatch scan <capture-or-dir> [more inputs...]
-burstwatch fingerprint <capture-or-dir> [more inputs...]
-burstwatch baseline <scan.json> [more scan json files...]
-burstwatch watch <baseline.json> <capture-or-dir> [more inputs...]
+sudo apt update
+sudo apt install -y rtl-sdr gnuradio gqrx-sdr
+```
+
+`rtl_sdr` is only needed for the `capture` command. GNU Radio and Gqrx are useful for recording, inspecting, and exporting captures before handing files to `burstwatch`.
+
+## Quick Start
+
+Launch the guided terminal UI:
+
+```bash
 burstwatch menu
 ```
 
-## Quick start
+Record a short passive capture from an RTL-SDR dongle:
+
+```bash
+burstwatch capture captures/433920000-lab.c64 \
+  --center-freq 433920000 \
+  --sample-rate 2400000 \
+  --duration 10 \
+  --metadata-json runs/433-capture.json
+```
+
+Record, then immediately scan the saved file:
+
+```bash
+burstwatch capture captures/433920000-lab.c64 \
+  --center-freq 433920000 \
+  --sample-rate 2400000 \
+  --duration 10 \
+  --then scan
+```
 
 Analyze one saved IQ capture:
 
 ```bash
-burstwatch analyze capture.c64 --sample-rate 2400000 --center-freq 433920000
+burstwatch analyze captures/433920000-lab.c64 \
+  --sample-rate 2400000 \
+  --center-freq 433920000
 ```
 
-Scan a directory of saved captures and write both summary and raw events:
+Scan a directory of captures:
 
 ```bash
 burstwatch scan captures/433/ \
@@ -78,90 +96,45 @@ burstwatch scan captures/433/ \
   --event-sqlite runs/433-events.sqlite3
 ```
 
-Build fingerprints from the same capture set:
+Review saved artifacts:
 
 ```bash
-burstwatch fingerprint captures/433/ \
-  --sample-rate 2400000 \
-  --center-freq 433920000 \
-  --recursive \
-  --name-prefix lab433 \
-  --json-out runs/433-fingerprints.json
+burstwatch dashboard runs --limit 20
 ```
 
-Build a baseline from prior scan summaries:
+## GNU Radio Handoff
+
+`burstwatch` expects raw `complex64` IQ or WAV input. In GNU Radio Companion, a simple file-first flow is:
+
+```text
+RTL-SDR Source
+-> Frequency Xlating FIR Filter or direct pass-through
+-> File Sink
+```
+
+Set the file sink to write complex samples, record a short capture, then analyze it:
 
 ```bash
-burstwatch baseline runs/day1-scan.json runs/day2-scan.json runs/day3-scan.json \
-  --json-out runs/433-baseline.json
+burstwatch scan captures/gnu-radio-step.c64 \
+  --sample-rate 2048000 \
+  --center-freq 915000000 \
+  --freq-bin-hz 10000
 ```
 
-Watch a fresh capture batch against the saved baseline:
+## Advanced Use
 
-```bash
-burstwatch watch runs/433-baseline.json captures/new/ \
-  --sample-rate 2400000 \
-  --center-freq 433920000 \
-  --recursive \
-  --json-out runs/433-watch.json
-```
-
-Launch the responsive Rich menu:
-
-```bash
-burstwatch menu
-```
-
-The menu adds:
-
-- a multicolor ASCII header on wide terminals
-- a compact fallback header on narrow terminals
-- guided prompts for all five workflows
-- Rich tables and panels for result summaries
-
-## Advanced workflows
-
-### 1. Unknown-emitter discovery in one band
-
-Use `scan` when you want passive device discovery, not packet decoding.
+Unknown-emitter discovery:
 
 ```bash
 burstwatch scan captures/ism-433/ \
   --sample-rate 2400000 \
   --center-freq 433920000 \
   --recursive \
-  --freq-bin-hz 5000
+  --freq-bin-hz 5000 \
+  --json-out runs/ism-433-scan.json
 ```
 
-What you get:
-
-- emitter candidate IDs such as `emitter-001`
-- approximate frequencies
-- dominant labels such as `ook_ask`, `fsk`, or `chirp`
-- burst counts, bandwidth, and mean duration
-
-### 2. Raw-event pipeline for later Elastic ingestion
-
-If you care about every burst, not just clustered emitters:
-
-```bash
-burstwatch scan captures/433/ \
-  --sample-rate 2400000 \
-  --center-freq 433920000 \
-  --event-jsonl runs/433-events.jsonl \
-  --event-sqlite runs/433-events.sqlite3 \
-  --json-out runs/433-scan.json
-```
-
-This gives you:
-
-- per-burst JSONL for log pipelines
-- SQLite for local filtering and ad hoc review
-- clustered scan JSON for higher-level inventory work
-
-### 3. Passive fingerprints for your own sensors
-
-If you have several recurring devices in a lab and want reusable profiles:
+Passive fingerprints for your own lab sensors:
 
 ```bash
 burstwatch fingerprint captures/lab-session-a/ captures/lab-session-b/ \
@@ -169,47 +142,29 @@ burstwatch fingerprint captures/lab-session-a/ captures/lab-session-b/ \
   --center-freq 915000000 \
   --recursive \
   --freq-bin-hz 10000 \
-  --name-prefix lab915
+  --name-prefix lab915 \
+  --json-out runs/lab915-fingerprints.json
 ```
 
-Each fingerprint includes:
-
-- approximate frequency
-- dominant burst label
-- duration range
-- bandwidth range
-- duty cycle mean
-- repetition interval mean and standard deviation when available
-
-### 4. Environment baseline and anomaly watch
-
-Baseline:
+Environment baseline:
 
 ```bash
-burstwatch baseline runs/morning.json runs/afternoon.json runs/evening.json \
+burstwatch baseline runs/morning-scan.json runs/afternoon-scan.json runs/evening-scan.json \
   --freq-bin-hz 5000 \
   --json-out runs/lab-baseline.json
 ```
 
-Watch:
+Watch for changes:
 
 ```bash
 burstwatch watch runs/lab-baseline.json captures/fresh/ \
   --sample-rate 2400000 \
   --center-freq 433920000 \
-  --recursive
+  --recursive \
+  --json-out runs/lab-watch.json
 ```
 
-This is the intended defensive flow for:
-
-- new emitter appeared
-- same emitter but bandwidth changed
-- same emitter but duration or duty cycle changed
-- same emitter but the burst label shifted
-
-### 5. Narrow-band sweep batches
-
-If you export one capture per tuned step from GNU Radio or another recorder:
+Narrow-band sweep batches:
 
 ```bash
 burstwatch scan captures/sweep-step-1.c64 captures/sweep-step-2.c64 captures/sweep-step-3.c64 \
@@ -218,89 +173,41 @@ burstwatch scan captures/sweep-step-1.c64 captures/sweep-step-2.c64 captures/swe
   --freq-bin-hz 10000
 ```
 
-That is the current answer to passive “scanning” in this repo: you save the captures first, then `burstwatch` inventories them.
-
-### 6. WAV-only lab review
-
-For intermediate audio captures or demodulated lab recordings:
+JSONL pipeline for Elastic or another SOC stack:
 
 ```bash
-burstwatch analyze audio.wav
-burstwatch scan wav-captures/ --recursive
-```
-
-## Input assumptions
-
-- `complex64` inputs require `--sample-rate`
-- `--center-freq` is optional but strongly recommended for meaningful emitter inventories
-- directory inputs default to `*.c64` and `*.wav`
-- use `--pattern` repeatedly when you want narrower directory selection
-
-Example:
-
-```bash
-burstwatch scan captures/ \
+burstwatch scan captures/433/ \
   --sample-rate 2400000 \
   --center-freq 433920000 \
-  --pattern "*.c64" \
-  --pattern "*.wav"
+  --event-jsonl runs/433-events.jsonl \
+  --json-out runs/433-scan.json
 ```
 
-## GNU Radio handoff
+## Output Model
 
-The intended live workflow is:
+`burstwatch` writes reviewable local artifacts:
 
-1. Use GNU Radio, `rtl_sdr`, or another receiver to save a capture.
-2. Run `burstwatch analyze` or `burstwatch scan` on that capture.
-3. Use `fingerprint`, `baseline`, and `watch` to build durable passive discovery workflows.
+- scan summaries: clustered emitter candidates and label counts
+- fingerprint summaries: reusable passive profiles for recurring devices
+- baselines: normal RF profiles learned from prior scans
+- watch reports: new or changed emitter alerts against a baseline
+- JSONL events: one line per burst for log pipelines
+- SQLite events: local filtering and ad hoc review
 
-This keeps the command layer testable and auditable before any future live-capture work.
+## Development
 
-## Output shape
+Run the test suite:
 
-`analyze` emits per-burst events with:
+```bash
+PYTHONPATH=src python3 -m unittest discover -s tests -v
+```
 
-- capture path
-- timing span
-- label and confidence
-- bandwidth
-- duty cycle
-- tone counts
-- chirp slope
-
-`scan` emits emitter candidates with:
-
-- candidate ID
-- approximate frequency
-- dominant label
-- label counts
-- burst count
-- duration and bandwidth ranges
-- repetition interval statistics when visible
-
-`baseline` emits stable records with:
-
-- baseline ID
-- expected label
-- expected bandwidth and duration
-- expected burst counts
-- frequency tolerance
-
-`watch` emits alert entries with:
-
-- `new` for unseen emitters
-- `changed` for emitters that drifted beyond the learned baseline
-
-## Verification
-
-Current repo checks:
+Run compile checks:
 
 ```bash
 PYTHONPATH=src python3 -m compileall src tests
-PYTHONPATH=src python3 -m unittest discover -s tests -v
-PYTHONPATH=src python3 -m burstwatch --help
 ```
 
-## Next step
+## License
 
-The next logical pass is deeper menu polish or a live-capture helper that feeds these same workflows without replacing them.
+MIT. See [LICENSE](LICENSE).
