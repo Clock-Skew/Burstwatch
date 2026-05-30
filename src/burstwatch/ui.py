@@ -3,13 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+import sys
 from typing import Callable
 
 from rich import box
 from rich.align import Align
 from rich.console import Console, Group
 from rich.panel import Panel
-from rich.prompt import Confirm, FloatPrompt, IntPrompt, Prompt
 from rich.table import Table
 from rich.text import Text
 
@@ -162,6 +162,42 @@ SIGNAL_PATHS = (
         duration_s=8.0,
         freq_bin_hz=100_000.0,
     ),
+    SignalPath(
+        "7",
+        "162 MHz NOAA weather radio",
+        162_550_000.0,
+        "Continuous public weather broadcast useful for receiver validation.",
+        "NOAA Weather Radio in the 162.400-162.550 MHz range.",
+        "Carrier presence, gain tuning, front-end overload checks, nearby interference.",
+        "Public broadcast reception; do not treat voice/audio content as a target.",
+        sample_rate_hz=1_024_000.0,
+        duration_s=12.0,
+        freq_bin_hz=25_000.0,
+    ),
+    SignalPath(
+        "8",
+        "868 MHz lab imports",
+        868_300_000.0,
+        "Imported or lab-only EU ISM captures when you have the hardware or files.",
+        "Owned EU sensors, imported devices, or replay-free lab captures.",
+        "Timing patterns, narrowband sensor activity, cross-region comparisons.",
+        "Only for owned or authorized hardware/captures; regional legality varies.",
+        sample_rate_hz=1_024_000.0,
+        duration_s=10.0,
+        freq_bin_hz=10_000.0,
+    ),
+    SignalPath(
+        "9",
+        "161.975 MHz AIS trust study",
+        161_975_000.0,
+        "Public maritime telemetry and receiver practice.",
+        "AIS energy checks before using a purpose-built maritime decoder.",
+        "Burst density, timing, receiver placement, and public-telemetry trust questions.",
+        "Receive-only observation; no maritime interference or operational claims.",
+        sample_rate_hz=1_024_000.0,
+        duration_s=20.0,
+        freq_bin_hz=25_000.0,
+    ),
 )
 
 
@@ -171,12 +207,7 @@ def run_menu() -> int:
     while True:
         _screen_break(console)
         console.print(render_menu_screen(console, actions))
-        choice = Prompt.ask(
-            "[bold cyan]Select action[/bold cyan]",
-            choices=[action.key for action in actions],
-            default="1",
-            console=console,
-        )
+        choice = _ask_choice(console, "Select action", [action.key for action in actions], default="1")
         action = next(action for action in actions if action.key == choice)
         if action.key == "9":
             console.print("[bold green]Exiting Burstwatch menu.[/bold green]")
@@ -306,12 +337,7 @@ def _run_start_here_menu(console: Console) -> None:
     table.add_row("4", "Open receiver tools", "Use Gqrx, GNU Radio, or rtl_test from here.")
     table.add_row("5", "Return", "Go back to the main menu.")
     console.print(table)
-    choice = Prompt.ask(
-        "Choose a path",
-        choices=["1", "2", "3", "4", "5"],
-        default="1",
-        console=console,
-    )
+    choice = _ask_choice(console, "Choose a path", ["1", "2", "3", "4", "5"], default="1")
     if choice == "1":
         _run_signal_paths_menu(console)
     elif choice == "2":
@@ -327,7 +353,7 @@ def _run_start_here_menu(console: Console) -> None:
 def _run_capture_menu(console: Console, preset: BandPreset | None = None) -> None:
     if not _require_tool(console, "rtl_sdr"):
         return
-    if Confirm.ask("Run USB SDR hardware test first?", default=True, console=console):
+    if _ask_confirm(console, "Run USB SDR hardware test first?", default=True):
         _run_rtl_test(console)
     if preset is None:
         _print_recording_examples(console)
@@ -335,15 +361,15 @@ def _run_capture_menu(console: Console, preset: BandPreset | None = None) -> Non
     else:
         _print_selected_path(console, preset)
     center_freq_hz = preset.center_freq_hz
-    sample_rate_hz = FloatPrompt.ask("Sample rate Hz", default=preset.sample_rate_hz, console=console)
-    duration_s = FloatPrompt.ask("Duration seconds", default=preset.duration_s, console=console)
+    sample_rate_hz = _ask_float(console, "Sample rate Hz", default=preset.sample_rate_hz)
+    duration_s = _ask_float(console, "Duration seconds", default=preset.duration_s)
     output_path = _ask_path_default(console, "Saved IQ capture path", _default_capture_path(center_freq_hz))
-    gain = Prompt.ask("Gain", default="auto", console=console)
-    device_index = IntPrompt.ask("RTL-SDR device index", default=0, console=console)
+    gain = _ask_text(console, "Gain", default="auto")
+    device_index = _ask_int(console, "RTL-SDR device index", default=0)
     ppm = _ask_optional_int(console, "PPM correction", default="")
-    rtl_sdr_path = Prompt.ask("rtl_sdr executable", default="rtl_sdr", console=console)
+    rtl_sdr_path = _ask_text(console, "rtl_sdr executable", default="rtl_sdr")
     keep_raw_path = None
-    if Confirm.ask("Keep raw unsigned 8-bit IQ?", default=False, console=console):
+    if _ask_confirm(console, "Keep raw unsigned 8-bit IQ?", default=False):
         keep_raw_path = Path(_ask_required(console, "Raw IQ output path"))
 
     request = RtlSdrCaptureRequest(
@@ -377,17 +403,12 @@ def _run_capture_menu(console: Console, preset: BandPreset | None = None) -> Non
 def _run_existing_capture_menu(console: Console) -> None:
     _print_capture_import_examples(console)
     capture_path = Path(_ask_required(console, "Capture file or folder"))
-    sample_format = Prompt.ask(
-        "Input format",
-        choices=["auto", "complex64", "wav"],
-        default="auto",
-        console=console,
-    )
+    sample_format = _ask_choice(console, "Input format", ["auto", "complex64", "wav"], default="auto")
     sample_rate_hz = None
     if sample_format != "wav":
-        sample_rate_hz = FloatPrompt.ask("Sample rate Hz", default=2_400_000.0, console=console)
+        sample_rate_hz = _ask_float(console, "Sample rate Hz", default=2_400_000.0)
     center_freq_hz = _ask_optional_float(console, "Center frequency Hz", default="")
-    freq_bin_hz = FloatPrompt.ask("Frequency grouping Hz", default=25_000.0, console=console)
+    freq_bin_hz = _ask_float(console, "Frequency grouping Hz", default=25_000.0)
     recursive = capture_path.is_dir()
     summary, events = scan_inputs(
         [capture_path],
@@ -435,23 +456,18 @@ def _run_signal_paths_menu(console: Console) -> None:
         if console.size.width >= 92:
             row.append(path.focus)
         table.add_row(*row)
-    return_row = ["7", "Return", "-"]
+    return_row = ["0", "Return", "-"]
     if console.size.width >= 92:
         return_row.append("Back to the main menu.")
     table.add_row(*return_row)
     console.print(table)
-    choice = Prompt.ask("Choose signal idea", choices=[path.key for path in SIGNAL_PATHS] + ["7"], default="1", console=console)
-    if choice == "7":
+    choice = _ask_choice(console, "Choose signal idea", [path.key for path in SIGNAL_PATHS] + ["0"], default="1")
+    if choice == "0":
         return
 
     signal_path = next(path for path in SIGNAL_PATHS if path.key == choice)
     _print_signal_path_detail(console, signal_path)
-    action = Prompt.ask(
-        "Next",
-        choices=["1", "2", "3"],
-        default="1",
-        console=console,
-    )
+    action = _ask_choice(console, "Next", ["1", "2", "3"], default="1")
     if action == "1":
         _run_capture_menu(console, preset=signal_path.to_preset())
     elif action == "2":
@@ -467,12 +483,7 @@ def _run_baseline_watch_menu(console: Console) -> None:
     table.add_row("2", "Watch against baseline", "Compare a new capture set against a saved baseline.")
     table.add_row("3", "Return", "Go back.")
     console.print(table)
-    choice = Prompt.ask(
-        "Baseline workflow",
-        choices=["1", "2", "3"],
-        default="1",
-        console=console,
-    )
+    choice = _ask_choice(console, "Baseline workflow", ["1", "2", "3"], default="1")
     if choice == "1":
         scan_paths = _recent_artifact_paths("scan")
         if not scan_paths:
@@ -500,12 +511,7 @@ def _run_advanced_menu(console: Console) -> None:
     table.add_row("5", "Watch against baseline")
     table.add_row("6", "Return")
     console.print(table)
-    choice = Prompt.ask(
-        "Advanced workflow",
-        choices=["1", "2", "3", "4", "5", "6"],
-        default="1",
-        console=console,
-    )
+    choice = _ask_choice(console, "Advanced workflow", ["1", "2", "3", "4", "5", "6"], default="1")
     if choice == "1":
         _run_analyze_menu(console)
     elif choice == "2":
@@ -521,12 +527,7 @@ def _run_advanced_menu(console: Console) -> None:
 
 def _run_analyze_menu(console: Console) -> None:
     capture_path = Path(_ask_required(console, "Capture path"))
-    sample_format = Prompt.ask(
-        "Input format",
-        choices=["auto", "complex64", "wav"],
-        default="auto",
-        console=console,
-    )
+    sample_format = _ask_choice(console, "Input format", ["auto", "complex64", "wav"], default="auto")
     sample_rate_hz = _ask_optional_float(console, "Sample rate Hz", default="2400000") if sample_format != "wav" else None
     center_freq_hz = _ask_optional_float(console, "Center frequency Hz", default="")
     prompt_values = _prompt_analysis_values(console)
@@ -540,29 +541,29 @@ def _run_analyze_menu(console: Console) -> None:
     events = analyze_capture(capture, config)
     summary = summarize_events(capture, events)
     _print_analyze_summary(console, summary)
-    if Confirm.ask("Write JSONL event output?", default=False, console=console):
+    if _ask_confirm(console, "Write JSONL event output?", default=False):
         write_jsonl(events, Path(_ask_required(console, "JSONL output path")))
-    if Confirm.ask("Write SQLite event output?", default=False, console=console):
+    if _ask_confirm(console, "Write SQLite event output?", default=False):
         write_sqlite(events, Path(_ask_required(console, "SQLite output path")))
 
 
 def _run_scan_menu(console: Console) -> None:
     summary, events = _prompt_scan(console)
     _print_scan_summary(console, summary.to_dict())
-    if Confirm.ask("Write scan summary JSON?", default=True, console=console):
+    if _ask_confirm(console, "Write scan summary JSON?", default=True):
         write_json_document(summary.to_dict(), Path(_ask_required(console, "Summary JSON path")))
-    if Confirm.ask("Write raw event JSONL?", default=False, console=console):
+    if _ask_confirm(console, "Write raw event JSONL?", default=False):
         write_jsonl(events, Path(_ask_required(console, "Event JSONL path")))
-    if Confirm.ask("Write raw event SQLite?", default=False, console=console):
+    if _ask_confirm(console, "Write raw event SQLite?", default=False):
         write_sqlite(events, Path(_ask_required(console, "Event SQLite path")))
 
 
 def _run_fingerprint_menu(console: Console) -> None:
     summary, _events = _prompt_scan(console)
-    name_prefix = Prompt.ask("Fingerprint ID prefix", default="fp", console=console)
+    name_prefix = _ask_text(console, "Fingerprint ID prefix", default="fp")
     fingerprints = build_fingerprints(summary, name_prefix=name_prefix)
     _print_fingerprint_summary(console, fingerprints.to_dict())
-    if Confirm.ask("Write fingerprint JSON?", default=True, console=console):
+    if _ask_confirm(console, "Write fingerprint JSON?", default=True):
         write_json_document(fingerprints.to_dict(), Path(_ask_required(console, "Fingerprint JSON path")))
 
 
@@ -571,7 +572,7 @@ def _run_baseline_menu(console: Console) -> None:
     freq_bin_hz = _ask_optional_float(console, "Frequency bin Hz", default="25000") or 25_000.0
     summary = build_baseline(scan_paths, freq_bin_hz=freq_bin_hz)
     _print_baseline_summary(console, summary.to_dict())
-    if Confirm.ask("Write baseline JSON?", default=True, console=console):
+    if _ask_confirm(console, "Write baseline JSON?", default=True):
         write_json_document(summary.to_dict(), Path(_ask_required(console, "Baseline JSON path")))
 
 
@@ -580,7 +581,7 @@ def _run_watch_menu(console: Console) -> None:
     summary, _events = _prompt_scan(console)
     watch = watch_against_baseline(baseline_path, summary)
     _print_watch_summary(console, watch.to_dict())
-    if Confirm.ask("Write watch JSON?", default=True, console=console):
+    if _ask_confirm(console, "Write watch JSON?", default=True):
         write_json_document(watch.to_dict(), Path(_ask_required(console, "Watch JSON path")))
 
 
@@ -596,10 +597,12 @@ def _run_dashboard_menu(console: Console) -> None:
         )
     )
     _print_dashboard_summary(console, artifacts)
+    _print_frequency_reference(console)
+    _print_authorized_tracks(console)
     _print_tool_statuses(console, tool_statuses())
     if artifacts:
         _print_dashboard_choices(console, with_artifacts=True)
-        choice = Prompt.ask("Next action", choices=["1", "2", "3", "4"], default="1", console=console)
+        choice = _ask_choice(console, "Next action", ["1", "2", "3", "4"], default="1")
         if choice == "1":
             _run_capture_menu(console)
         elif choice == "2":
@@ -609,7 +612,7 @@ def _run_dashboard_menu(console: Console) -> None:
         return
 
     _print_dashboard_choices(console, with_artifacts=False)
-    choice = Prompt.ask("Next action", choices=["1", "2", "3"], default="1", console=console)
+    choice = _ask_choice(console, "Next action", ["1", "2", "3"], default="1")
     if choice == "1":
         _run_start_here_menu(console)
     elif choice == "2":
@@ -647,7 +650,7 @@ def _run_tools_menu(console: Console) -> None:
     table.add_row("4", "Show install commands")
     table.add_row("5", "Return")
     console.print(table)
-    choice = Prompt.ask("Tool action", choices=["1", "2", "3", "4", "5"], default="1", console=console)
+    choice = _ask_choice(console, "Tool action", ["1", "2", "3", "4", "5"], default="1")
     if choice == "1":
         _run_rtl_test(console)
     elif choice == "2":
@@ -660,15 +663,10 @@ def _run_tools_menu(console: Console) -> None:
 
 def _prompt_scan(console: Console):
     inputs = _ask_path_list(console, "Capture paths or directories (comma separated)")
-    sample_format = Prompt.ask(
-        "Input format",
-        choices=["auto", "complex64", "wav"],
-        default="auto",
-        console=console,
-    )
+    sample_format = _ask_choice(console, "Input format", ["auto", "complex64", "wav"], default="auto")
     sample_rate_hz = _ask_optional_float(console, "Sample rate Hz", default="2400000") if sample_format != "wav" else None
     center_freq_hz = _ask_optional_float(console, "Center frequency Hz", default="")
-    recursive = Confirm.ask("Recurse into directories?", default=True, console=console)
+    recursive = _ask_confirm(console, "Recurse into directories?", default=True)
     freq_bin_hz = _ask_optional_float(console, "Frequency bin Hz", default="25000") or 25_000.0
     prompt_values = _prompt_analysis_values(console)
     return scan_inputs(
@@ -723,9 +721,9 @@ def _ask_band_preset(console: Console) -> BandPreset:
         table.add_row(preset.key, preset.label, f"{preset.center_freq_hz / 1_000_000:.3f} MHz")
     table.add_row("4", "Custom frequency", "manual")
     console.print(table)
-    choice = Prompt.ask("Choose band", choices=["1", "2", "3", "4"], default="1", console=console)
+    choice = _ask_choice(console, "Choose band", ["1", "2", "3", "4"], default="1")
     if choice == "4":
-        center_freq_hz = FloatPrompt.ask("Center frequency Hz", default=433_920_000.0, console=console)
+        center_freq_hz = _ask_float(console, "Center frequency Hz", default=433_920_000.0)
         return BandPreset("4", "Custom frequency", center_freq_hz)
     return next(preset for preset in BAND_PRESETS if preset.key == choice)
 
@@ -854,6 +852,50 @@ def _print_tool_statuses(console: Console, statuses: list[ToolStatus]) -> None:
     console.print(table)
 
 
+def _print_frequency_reference(console: Console) -> None:
+    table = Table(box=box.SIMPLE_HEAVY, expand=True, header_style="bold bright_cyan")
+    table.add_column("Band", style="bold yellow", overflow="fold")
+    table.add_column("Center", style="magenta", no_wrap=True)
+    if console.size.width >= 100:
+        table.add_column("Use", style="white", overflow="fold")
+        table.add_column("Look for", style="bright_black", overflow="fold")
+    references = [
+        ("315 MHz", "315.000", "Owned low-power devices", "Short OOK/ASK bursts"),
+        ("433.92 MHz", "433.920", "Owned home/lab sensors", "Repeating IDs, narrow bursts"),
+        ("868.3 MHz", "868.300", "Imported/lab EU ISM gear", "Narrow telemetry activity"),
+        ("915 MHz", "915.000", "Owned US ISM telemetry", "FSK/chirp-like devices"),
+        ("100.1 MHz", "100.100", "FM receiver check", "Wide FM broadcast shape"),
+        ("137.1 MHz", "137.100", "NOAA APT practice", "Wide public satellite energy"),
+        ("162.55 MHz", "162.550", "NOAA weather radio", "Continuous public carrier"),
+        ("161.975 MHz", "161.975", "AIS trust study", "Public maritime bursts"),
+        ("1090 MHz", "1090.000", "ADS-B trust study", "Dense public telemetry bursts"),
+    ]
+    for band, center, use, look_for in references:
+        row = [band, f"{center} MHz"]
+        if console.size.width >= 100:
+            row.extend([use, look_for])
+        table.add_row(*row)
+    console.print(Panel(table, title="Band Reference", box=box.ROUNDED, border_style="bright_blue", expand=True))
+
+
+def _print_authorized_tracks(console: Console) -> None:
+    console.print(
+        Panel(
+            (
+                "Sharper next tracks, still permission-first:\n"
+                "- correlate RF captures with owned-lab network inventory\n"
+                "- collect firmware, manuals, FCC IDs, and update metadata\n"
+                "- compare time-of-day baselines and drift in emitter behavior\n"
+                "- review companion apps and exported captures in one evidence trail"
+            ),
+            title="Authorized Research Tracks",
+            box=box.ROUNDED,
+            border_style="bright_blue",
+            expand=True,
+        )
+    )
+
+
 def _print_install_hints(console: Console, statuses: list[ToolStatus]) -> None:
     commands = sorted({status.install_hint for status in statuses if not status.available})
     if not commands:
@@ -946,11 +988,11 @@ def _recent_artifact_paths(artifact_type: str) -> list[Path]:
 
 def _prompt_analysis_values(console: Console) -> AnalysisPromptValues:
     return AnalysisPromptValues(
-        smoothing_samples=IntPrompt.ask("Smoothing samples", default=256, console=console),
-        threshold_sigma=FloatPrompt.ask("Threshold sigma", default=6.0, console=console),
-        min_burst_ms=FloatPrompt.ask("Minimum burst ms", default=1.0, console=console),
-        merge_gap_ms=FloatPrompt.ask("Merge gap ms", default=0.5, console=console),
-        feature_window_count=IntPrompt.ask("Feature window count", default=8, console=console),
+        smoothing_samples=_ask_int(console, "Smoothing samples", default=256),
+        threshold_sigma=_ask_float(console, "Threshold sigma", default=6.0),
+        min_burst_ms=_ask_float(console, "Minimum burst ms", default=1.0),
+        merge_gap_ms=_ask_float(console, "Merge gap ms", default=0.5),
+        feature_window_count=_ask_int(console, "Feature window count", default=8),
     )
 
 
@@ -990,7 +1032,7 @@ def _analysis_config_from_values(
 
 def _ask_required(console: Console, label: str) -> str:
     while True:
-        value = Prompt.ask(f"[bold cyan]{label}[/bold cyan]", console=console).strip()
+        value = _ask_text(console, label).strip()
         if value:
             return value
         console.print("[bold red]Value is required.[/bold red]")
@@ -998,7 +1040,7 @@ def _ask_required(console: Console, label: str) -> str:
 
 def _ask_optional_float(console: Console, label: str, *, default: str) -> float | None:
     while True:
-        raw = Prompt.ask(f"[bold cyan]{label}[/bold cyan]", default=default, console=console).strip()
+        raw = _ask_text(console, label, default=default).strip()
         if not raw:
             return None
         try:
@@ -1009,7 +1051,7 @@ def _ask_optional_float(console: Console, label: str, *, default: str) -> float 
 
 def _ask_optional_int(console: Console, label: str, *, default: str) -> int | None:
     while True:
-        raw = Prompt.ask(f"[bold cyan]{label}[/bold cyan]", default=default, console=console).strip()
+        raw = _ask_text(console, label, default=default).strip()
         if not raw:
             return None
         try:
@@ -1024,16 +1066,81 @@ def _ask_path_list(console: Console, label: str) -> list[str]:
 
 
 def _ask_path_default(console: Console, label: str, default: Path) -> Path:
-    return Path(Prompt.ask(label, default=str(default), console=console))
+    return Path(_ask_text(console, label, default=str(default)))
 
 
 def _pause(console: Console) -> None:
-    console.input("[bright_black]Press Enter to continue[/bright_black]")
+    _read_prompt_line(console, "[bright_black]Press Enter to continue[/bright_black] ")
 
 
 def _screen_break(console: Console) -> None:
     console.print()
     console.rule("[bright_black]Burstwatch[/bright_black]")
+
+
+# Use direct stdin reads instead of input()/readline-backed prompt helpers so
+# the menu never enters terminal line-editing modes that can disturb keypad state.
+def _read_prompt_line(console: Console, prompt_markup: str) -> str:
+    console.print(Text.from_markup(prompt_markup), end="")
+    console.file.flush()
+    raw = sys.stdin.readline()
+    if raw == "":
+        return ""
+    return raw.rstrip("\n")
+
+
+def _ask_text(console: Console, label: str, *, default: str | None = None) -> str:
+    suffix = f" ({default})" if default is not None else ""
+    raw = _read_prompt_line(console, f"[bold cyan]{label}[/bold cyan]{suffix}: ").strip()
+    if not raw and default is not None:
+        return default
+    return raw
+
+
+def _ask_choice(console: Console, label: str, choices: list[str], *, default: str | None = None) -> str:
+    choice_suffix = "/".join(choices)
+    default_suffix = f" ({default})" if default is not None else ""
+    while True:
+        raw = _read_prompt_line(
+            console,
+            f"[bold cyan]{label}[/bold cyan] [{choice_suffix}]{default_suffix}: ",
+        ).strip()
+        if not raw and default is not None:
+            return default
+        if raw in choices:
+            return raw
+        console.print(f"[bold red]Choose one of:[/bold red] {', '.join(choices)}")
+
+
+def _ask_confirm(console: Console, label: str, *, default: bool) -> bool:
+    default_text = "Y/n" if default else "y/N"
+    while True:
+        raw = _read_prompt_line(console, f"[bold cyan]{label}[/bold cyan] [{default_text}]: ").strip().lower()
+        if not raw:
+            return default
+        if raw in {"y", "yes"}:
+            return True
+        if raw in {"n", "no"}:
+            return False
+        console.print("[bold red]Enter y or n.[/bold red]")
+
+
+def _ask_float(console: Console, label: str, *, default: float) -> float:
+    while True:
+        raw = _ask_text(console, label, default=str(default)).strip()
+        try:
+            return float(raw)
+        except ValueError:
+            console.print("[bold red]Enter a numeric value.[/bold red]")
+
+
+def _ask_int(console: Console, label: str, *, default: int) -> int:
+    while True:
+        raw = _ask_text(console, label, default=str(default)).strip()
+        try:
+            return int(raw)
+        except ValueError:
+            console.print("[bold red]Enter an integer value.[/bold red]")
 
 
 def _default_capture_path(center_freq_hz: float) -> Path:

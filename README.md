@@ -89,6 +89,11 @@ If you already have a capture, choose `6 Open a capture`. Burstwatch will ask fo
 
 The signal board is the home screen for results. It reads saved outputs from `runs/`.
 
+It also shows:
+
+- a live band reference for common public or owned-lab starting points
+- authorized research tracks for correlating RF work with firmware, notes, and local inventory
+
 If nothing has been saved yet, it says:
 
 ```text
@@ -124,8 +129,11 @@ Choose `3 Signal ideas` in the menu for these examples and matching capture defa
 | --- | ---: | --- | --- |
 | 433 MHz home/lab sensors | 433.920 MHz | Owned weather stations, contact sensors, outlet remotes, soil sensors | OOK/ASK bursts, repetition timing, rough bandwidth, baseline changes |
 | 315 MHz low-power devices | 315.000 MHz | Owned remotes, lab transmitters, your own TPMS presence checks | Short bursts, duty cycle, time gaps, new-emitter alerts |
+| 868 MHz lab imports | 868.300 MHz | Imported devices, owned EU lab captures | Narrow telemetry activity, timing patterns |
 | 902-928 MHz ISM activity | 915.000 MHz | Owned LoRa-style modules, lab sensors, hobby telemetry | FSK/chirp-like shapes, channel occupancy, recurring emitters |
 | 137 MHz NOAA practice | 137.100 MHz | Public NOAA APT satellite passes | Waterfall review, signal presence, Doppler awareness |
+| 162 MHz NOAA weather radio | 162.550 MHz | Public weather broadcast | Continuous carrier, gain checks, nearby interference |
+| 161.975 MHz AIS study | 161.975 MHz | Public maritime telemetry visibility | Public bursts, receiver placement, trust-study ideas |
 | 1090 MHz ADS-B study | 1090.000 MHz | Public aircraft broadcast visibility | Burst density and later trust-analysis ideas |
 | FM receiver check | 100.100 MHz | A known local FM broadcast station | Receiver, antenna, gain, and sample-rate sanity |
 

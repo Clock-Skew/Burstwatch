@@ -23,6 +23,7 @@
 
 - Keep the main menu calm, short, and practical.
 - Avoid clearing the terminal between screens so keypad state is not disturbed.
+- Keep menu input on direct stdin reads instead of line-editing helpers so terminal keypad state stays untouched.
 - Prefer "session", "signal board", "receiver tools", and "signal ideas" over training-wheel language.
 - Put examples inside the flow before asking for technical values.
 - Keep advanced flags available without making them the first experience.
